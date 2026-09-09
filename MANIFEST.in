@@ -5,9 +5,6 @@ include MANIFEST.in
 
 # Documentation
 include CLAUDE.md
-include PROJECT_STRUCTURE.md
-include PR1_IMPLEMENTATION_REPORT.md
-include PR2_IMPLEMENTATION_REPORT.md
 include taparash.md
 
 # Core module documentation

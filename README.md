@@ -40,7 +40,7 @@ Named after **Tapa Rash ** — meaning "Black Hill" in Kurdish — representing 
 - **Exact Deduplication:** SHA-256 hashing for identical content
 - **Fuzzy Deduplication:** MinHash LSH for near-duplicate detection
 
-#### **Semantic Layer** (Coming in PR2)
+#### **Semantic Layer** (Available Now)
 - Local embedding generation (MiniLM)
 - Vector-based semantic deduplication
 - Dead Letter Queue for audit logging
@@ -55,6 +55,21 @@ Named after **Tapa Rash ** — meaning "Black Hill" in Kurdish — representing 
 
 ### Installation
 
+**From PyPI (Recommended):**
+
+```bash
+# Core features only (no ML models)
+pip install taparash
+
+# With semantic deduplication (includes sentence-transformers)
+pip install taparash[semantic]
+
+# All features
+pip install taparash[all]
+```
+
+**From Source:**
+
 ```bash
 # Clone the repository
 git clone https://github.com/sn391/taparash.git
@@ -62,6 +77,9 @@ cd taparash
 
 # Install in development mode
 pip install -e .
+
+# Or install with semantic features
+pip install -e ".[semantic]"
 ```
 
 ### Basic Usage
