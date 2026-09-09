@@ -1,9 +1,12 @@
 # Taparash 
 
-[![Python Version](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
+[![PyPI version](https://badge.fury.io/py/taparash.svg)](https://pypi.org/project/taparash/)
+[![Python Version](https://img.shields.io/pypi/pyversions/taparash.svg)](https://pypi.org/project/taparash/)
+[![Tests](https://github.com/sn391/taparash/actions/workflows/tests.yml/badge.svg)](https://github.com/sn391/taparash/actions/workflows/tests.yml)
+[![Code Quality](https://github.com/sn391/taparash/actions/workflows/code-quality.yml/badge.svg)](https://github.com/sn391/taparash/actions/workflows/code-quality.yml)
+[![Build](https://github.com/sn391/taparash/actions/workflows/build.yml/badge.svg)](https://github.com/sn391/taparash/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.3.0-green.svg)](https://github.com/sn391/taparash)
-[![Code Style](https://img.shields.io/badge/code%20style-PEP8-blue.svg)](https://www.python.org/dev/peps/pep-0008/)
+[![Downloads](https://pepy.tech/badge/taparash)](https://pepy.tech/project/taparash)
 
 > **Air-Gapped, Zero-LLM Data Quality & Compliance Gateway for RAG Systems**
 

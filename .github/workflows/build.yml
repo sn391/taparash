@@ -1,0 +1,94 @@
+name: Build Package
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  release:
+    types: [created]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Distribution
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install build tools
+      run: |
+        python -m pip install --upgrade pip
+        pip install build twine
+
+    - name: Build package
+      run: |
+        python -m build
+
+    - name: Check distribution
+      run: |
+        twine check dist/*
+
+    - name: List distribution contents
+      run: |
+        tar -tzf dist/*.tar.gz | head -20
+        echo "---"
+        unzip -l dist/*.whl | head -20
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: distribution-packages
+        path: dist/
+
+  test-install:
+    name: Test Installation
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.9", "3.12"]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: distribution-packages
+        path: dist/
+
+    - name: Install from wheel
+      run: |
+        pip install dist/*.whl
+
+    - name: Test import
+      run: |
+        python -c "import taparash; print(f'Taparash v{taparash.__version__}')"
+        python -c "from taparash import TaparashFilter, QualityConfig; print('Core imports work')"
+
+    - name: Test basic functionality
+      run: |
+        python -c "
+        from taparash import TaparashFilter, QualityConfig
+        config = QualityConfig(enable_dlq=False)
+        app = TaparashFilter(config)
+        chunks = ['This is a test chunk with sufficient length', 'Too short', 'Another valid test chunk']
+        results = app.process_batch(chunks)
+        print(f'Processed {results.total} chunks: {len(results.accepted)} accepted, {len(results.rejected)} rejected')
+        assert results.total == 3, 'Expected 3 chunks'
+        "

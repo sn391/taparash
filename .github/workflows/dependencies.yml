@@ -1,0 +1,32 @@
+name: Dependency Check
+
+on:
+  schedule:
+    - cron: '0 0 * * 0'  # Run weekly on Sunday
+  workflow_dispatch:
+
+jobs:
+  check-dependencies:
+    name: Check for outdated dependencies
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install dependencies
+      run: |
+        pip install pip-audit pip-tools
+
+    - name: Security audit
+      run: |
+        pip-audit --desc || true
+
+    - name: Check for outdated packages
+      run: |
+        pip list --outdated
