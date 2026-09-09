@@ -1,15 +1,15 @@
-# Taparash (تپه رش)
+# Taparash 
 
 [![Python Version](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](https://github.com/yourusername/taparash)
+[![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](https://github.com/sn391/taparash)
 [![Code Style](https://img.shields.io/badge/code%20style-PEP8-blue.svg)](https://www.python.org/dev/peps/pep-0008/)
 
 > **Air-Gapped, Zero-LLM Data Quality & Compliance Gateway for RAG Systems**
 
 Taparash is a high-performance, 100% offline data quality and compliance gateway designed to clean, deduplicate, and validate text data before it enters your Vector Database or Retrieval-Augmented Generation (RAG) pipeline. Built for privacy-first enterprise environments with **zero internet dependencies and zero LLM overhead**.
 
-Named after **Tepe Rash (تپه رش)** — meaning "Black Hill" in Kurdish — representing solid roots, unyielding strength, and local data sovereignty.
+Named after **Tapa Rash ** — meaning "Black Hill" in Kurdish — representing solid roots, unyielding strength, and local data sovereignty.
 
 ---
 
@@ -57,7 +57,7 @@ Named after **Tepe Rash (تپه رش)** — meaning "Black Hill" in Kurdish — 
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/taparash.git
+git clone https://github.com/sn391/taparash.git
 cd taparash
 
 # Install in development mode
@@ -788,7 +788,7 @@ We welcome contributions! Here's how you can help:
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/taparash.git
+git clone https://github.com/sn391/taparash.git
 cd taparash
 
 # Create virtual environment
@@ -830,15 +830,15 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - Inspired by the need for privacy-first AI infrastructure
 - Built on proven algorithms: SHA-256, MinHash, Shannon Entropy
-- Named after **Tepe Rash (تپه رش)** - symbolizing strength and sovereignty
+- Named after **Tapa Rash ** - symbolizing strength and sovereignty
 
 ---
 
 ## 📞 Contact & Support
 
-- **Issues:** [GitHub Issues](https://github.com/yourusername/taparash/issues)
-- **Discussions:** [GitHub Discussions](https://github.com/yourusername/taparash/discussions)
-- **Email:** [your.email@example.com](mailto:your.email@example.com)
+- **Issues:** [GitHub Issues](https://github.com/sn391/taparash/issues)
+- **Discussions:** [GitHub Discussions](https://github.com/sn391/taparash/discussions)
+- **Email:** [sn391@yahoo.com](mailto:sn391@yahoo.com)
 
 ---
 
@@ -865,6 +865,6 @@ Maintain high-quality, deduplicated knowledge bases for customer support and int
 
 **Built with ❤️ for privacy-first AI**
 
-[⭐ Star on GitHub](https://github.com/yourusername/taparash) | [📖 Documentation](https://github.com/yourusername/taparash/wiki) | [🐛 Report Bug](https://github.com/yourusername/taparash/issues)
+[⭐ Star on GitHub](https://github.com/sn391/taparash) | [📖 Documentation](https://github.com/sn391/taparash/wiki) | [🐛 Report Bug](https://github.com/sn391/taparash/issues)
 
 </div>

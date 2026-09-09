@@ -1,0 +1,28 @@
+include README.md
+include LICENSE
+include pyproject.toml
+include MANIFEST.in
+
+# Documentation
+include CLAUDE.md
+include PROJECT_STRUCTURE.md
+include PR1_IMPLEMENTATION_REPORT.md
+include PR2_IMPLEMENTATION_REPORT.md
+include taparash.md
+
+# Core module documentation
+include core/README_DEDUPLICATION.md
+
+# Examples
+include example_usage.py
+include demo_deduplication.py
+
+# Tests
+recursive-include tests *.py
+
+# Exclude
+global-exclude __pycache__
+global-exclude *.py[co]
+global-exclude .DS_Store
+global-exclude *.so
+global-exclude *.db

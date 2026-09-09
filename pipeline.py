@@ -5,6 +5,16 @@ from taparash.config import QualityConfig, FilterResult, BatchResult
 from taparash.core.entropy import shannon_entropy, is_gibberish
 from taparash.core.deduplication import ExactDeduplicator, MinHashDeduplicator
 from taparash.core.pii import PIIMasker
+from taparash.dlq import DeadLetterQueue
+
+# Optional: Import semantic deduplication (requires sentence-transformers)
+try:
+    from taparash.engines.embeddings import LocalEmbedder, SemanticDeduplicator
+    SEMANTIC_AVAILABLE = True
+except ImportError:
+    SEMANTIC_AVAILABLE = False
+    LocalEmbedder = None
+    SemanticDeduplicator = None
 
 
 class TaparashFilter:
@@ -34,6 +44,8 @@ class TaparashFilter:
         # Initialize components
         self._init_pii_masker()
         self._init_deduplicators()
+        self._init_semantic_dedup()
+        self._init_dlq()
 
         # Statistics
         self.stats = {
@@ -76,6 +88,35 @@ class TaparashFilter:
             )
         else:
             self.fuzzy_dedup = None
+
+    def _init_semantic_dedup(self):
+        """Initialize semantic deduplication component."""
+        if self.config.enable_semantic_dedup:
+            if not SEMANTIC_AVAILABLE:
+                raise ImportError(
+                    "sentence-transformers is required for semantic deduplication. "
+                    "Install with: pip install sentence-transformers"
+                )
+
+            # Initialize embedder and semantic deduplicator
+            embedder = LocalEmbedder(
+                model_name=self.config.embeddings_model_path,
+                cache_dir=None  # Use default cache
+            )
+            self.semantic_dedup = SemanticDeduplicator(
+                embedder=embedder,
+                threshold=self.config.semantic_threshold,
+                store_texts=False  # Don't store texts for memory efficiency
+            )
+        else:
+            self.semantic_dedup = None
+
+    def _init_dlq(self):
+        """Initialize Dead Letter Queue for audit logging."""
+        if self.config.enable_dlq:
+            self.dlq = DeadLetterQueue(db_path=self.config.dlq_path)
+        else:
+            self.dlq = None
 
     def process_single(self, text: str) -> FilterResult:
         """
@@ -167,10 +208,24 @@ class TaparashFilter:
                     }
                 )
 
-        # Gate 6: Semantic deduplication (not yet implemented)
-        if self.config.enable_semantic_dedup:
-            # TODO: Implement semantic deduplication using local embeddings
-            pass
+        # Gate 6: Semantic deduplication
+        if self.semantic_dedup:
+            is_unique, similar_idx, similarity = self.semantic_dedup.add(text)
+            if not is_unique:
+                self.stats["rejected_semantic_duplicate"] += 1
+                return FilterResult(
+                    text=text,
+                    original_text=original_text,
+                    is_valid=False,
+                    reason_code="SEMANTIC_DUPLICATE",
+                    reason_detail=f"Semantically similar to index {similar_idx} (similarity: {similarity:.3f})",
+                    metadata={
+                        "similar_to_index": similar_idx,
+                        "similarity_score": similarity,
+                        "threshold": self.config.semantic_threshold,
+                        "pii_masked_count": len(pii_matches)
+                    }
+                )
 
         # Gate 7: Contradiction detection (not yet implemented)
         if self.config.check_contradictions:
@@ -210,6 +265,10 @@ class TaparashFilter:
             else:
                 result.rejected.append(filter_result)
 
+        # Log rejected chunks to DLQ
+        if self.dlq and result.rejected:
+            self.dlq.log_batch(result.rejected)
+
         return result
 
     def reset(self):
@@ -219,6 +278,9 @@ class TaparashFilter:
 
         if self.fuzzy_dedup:
             self.fuzzy_dedup.reset()
+
+        if self.semantic_dedup:
+            self.semantic_dedup.reset()
 
         self.stats = {
             "total_processed": 0,

@@ -1,0 +1,129 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "taparash"
+version = "0.1.0"
+description = "Air-Gapped, Zero-LLM Data Quality & Compliance Gateway for RAG Systems"
+readme = "README.md"
+authors = [
+    {name = "Taparash Contributors", email = "sn391@github.com"}
+]
+maintainers = [
+    {name = "Taparash Contributors", email = "sn391@github.com"}
+]
+license = {file = "LICENSE"}
+requires-python = ">=3.9"
+keywords = [
+    "data-quality",
+    "rag",
+    "deduplication",
+    "pii-masking",
+    "compliance",
+    "gdpr",
+    "offline",
+    "zero-llm",
+    "text-processing",
+    "data-cleaning"
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Text Processing :: Filters",
+    "Topic :: Security",
+]
+
+dependencies = [
+    "numpy>=1.20.0",
+]
+
+[project.optional-dependencies]
+semantic = [
+    "sentence-transformers>=2.0.0",
+    "torch>=1.9.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "black>=22.0.0",
+    "isort>=5.10.0",
+    "mypy>=0.950",
+    "flake8>=4.0.0",
+]
+all = [
+    "sentence-transformers>=2.0.0",
+    "torch>=1.9.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/sn391/taparash"
+Repository = "https://github.com/sn391/taparash"
+Documentation = "https://github.com/sn391/taparash#readme"
+"Bug Tracker" = "https://github.com/sn391/taparash/issues"
+Changelog = "https://github.com/sn391/taparash/releases"
+
+[tool.setuptools]
+# Package is at repository root
+py-modules = [
+    "__init__",
+    "config",
+    "pipeline",
+    "dlq",
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["core*", "engines*"]
+exclude = ["tests*", "taparash"]
+
+[tool.setuptools.package-data]
+taparash = ["py.typed"]
+
+[tool.black]
+line-length = 100
+target-version = ['py39', 'py310', 'py311', 'py312']
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.mypy_cache
+  | \.pytest_cache
+  | \.venv
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+multi_line_output = 3
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
