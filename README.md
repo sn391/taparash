@@ -9,7 +9,7 @@
 
 Taparash is a high-performance, 100% offline data quality and compliance gateway designed to clean, deduplicate, and validate text data before it enters your Vector Database or Retrieval-Augmented Generation (RAG) pipeline. Built for privacy-first enterprise environments with **zero internet dependencies and zero LLM overhead**.
 
-Named after **Tapa Rash ** — meaning "Black Hill" in Kurdish — representing solid roots, unyielding strength, and local data sovereignty.
+Named after **Tapa Rash ** (meaning "Black Hill" in Kurdish) representing solid roots, unyielding strength, and local sovereignty.
 
 ---
 
