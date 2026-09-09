@@ -2,7 +2,7 @@
 
 [![Python Version](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](https://github.com/sn391/taparash)
+[![Version](https://img.shields.io/badge/version-0.2.0-green.svg)](https://github.com/sn391/taparash)
 [![Code Style](https://img.shields.io/badge/code%20style-PEP8-blue.svg)](https://www.python.org/dev/peps/pep-0008/)
 
 > **Air-Gapped, Zero-LLM Data Quality & Compliance Gateway for RAG Systems**
@@ -40,10 +40,12 @@ Named after **Tapa Rash ** (meaning "Black Hill" in Kurdish) representing solid 
 - **Exact Deduplication:** SHA-256 hashing for identical content
 - **Fuzzy Deduplication:** MinHash LSH for near-duplicate detection
 
-#### **Semantic Layer** (Available Now)
+#### **Semantic Layer** (Phase 2 - Completed)
 - Local embedding generation (MiniLM)
 - Vector-based semantic deduplication
 - Dead Letter Queue for audit logging
+- Batch processing optimization
+- Parallel processing support
 
 #### **NLI Layer** (Coming in PR3)
 - Local Cross-Encoder for contradiction detection
@@ -213,9 +215,9 @@ Taparash implements a multi-gate filtering pipeline where each chunk passes thro
                          │ PASS
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  GATE 6: Semantic Deduplication (Coming in PR2)              │
-│  ⏳ Local MiniLM embeddings                                  │
-│  ⏳ Vector clustering                                         │
+│  GATE 6: Semantic Deduplication (Phase 2)                    │
+│  ✓ Local MiniLM embeddings                                   │
+│  ✓ Vector similarity matching                                │
 └────────────────────────┬────────────────────────────────────┘
                          │ PASS
                          ▼
@@ -280,8 +282,8 @@ config = QualityConfig(
     contradiction_threshold=0.7,      # NLI confidence threshold
     
     # Processing options
-    batch_size=100,                   # Batch processing size
-    parallel_workers=4,               # Parallel processing threads
+    batch_size=100,                   # Batch processing size (chunks per batch)
+    parallel_workers=4,               # Parallel processing threads (for stateless gates)
 )
 ```
 
@@ -326,14 +328,24 @@ else:
     print(f"Rejected: {result.reason_code}")
 ```
 
-##### `process_batch(texts: List[str]) -> BatchResult`
-Process multiple chunks in batch.
+##### `process_batch(texts: List[str], use_parallel: bool = False) -> BatchResult`
+Process multiple chunks in batch with optional parallel processing.
 
 ```python
+# Sequential processing (default)
 results = app.process_batch(["text1", "text2", "text3"])
 print(f"Accepted: {len(results.accepted)}")
 print(f"Rejected: {len(results.rejected)}")
+
+# Parallel processing (recommended for large batches)
+results = app.process_batch(large_batch, use_parallel=True)
 ```
+
+**Parallel Processing:**
+- Stateless gates (length, PII, entropy) run in parallel
+- Stateful gates (deduplication) run sequentially with thread locks
+- Best for large batches (>1000 chunks) or with semantic deduplication enabled
+- Thread count controlled by `parallel_workers` config parameter
 
 ##### `reset()`
 Reset all deduplicators and statistics.
@@ -383,6 +395,72 @@ Result object for batch processing.
 
 **Methods:**
 - `summary() -> str` - Get formatted summary
+
+### DeadLetterQueue
+
+SQLite-based audit log for rejected chunks (Phase 2).
+
+#### Methods
+
+##### `__init__(db_path: Optional[str] = None)`
+Initialize DLQ with optional database path (default: `./taparash_dlq.db`).
+
+##### `log_rejection(result: FilterResult)`
+Log a single rejected chunk.
+
+##### `log_batch(rejected_results: List[FilterResult])`
+Log multiple rejected chunks in one transaction.
+
+##### `get_rejection_stats() -> Dict[str, int]`
+Get counts by rejection reason.
+
+```python
+stats = dlq.get_rejection_stats()
+# {'LENGTH_TOO_SHORT': 45, 'EXACT_DUPLICATE': 23, ...}
+```
+
+##### `get_recent_rejections(limit: int = 100) -> List[Dict]`
+Get most recent rejection records.
+
+##### `get_pii_violations(limit: int = 100) -> List[Dict]`
+Get chunks with PII detected.
+
+##### `export_to_json(output_path: str, reason_code: Optional[str] = None) -> int`
+Export rejection records to JSON file.
+
+```python
+# Export all rejections
+dlq.export_to_json("rejections.json")
+
+# Export only specific reason
+dlq.export_to_json("length_issues.json", reason_code="LENGTH_TOO_SHORT")
+```
+
+##### `clear_old_records(days: int = 90) -> int`
+Delete records older than specified days.
+
+**Example Usage:**
+
+```python
+from taparash import TaparashFilter, QualityConfig, DeadLetterQueue
+
+config = QualityConfig(
+    enable_dlq=True,
+    dlq_path="audit_log.db"
+)
+
+app = TaparashFilter(config)
+results = app.process_batch(chunks)
+
+# Rejections are automatically logged to DLQ
+
+# Query DLQ
+dlq = DeadLetterQueue("audit_log.db")
+dlq.print_summary()
+
+# Get PII violations for compliance report
+pii_violations = dlq.get_pii_violations(limit=100)
+```
 
 ---
 
@@ -706,6 +784,104 @@ def generate_quality_report(dataset):
     return report
 ```
 
+### Example 4: Semantic Deduplication (Phase 2)
+
+```python
+from taparash import TaparashFilter, QualityConfig
+
+def process_with_semantic_dedup(texts):
+    """
+    Use semantic deduplication to detect paraphrases and similar content.
+    Requires: pip install sentence-transformers
+    """
+    
+    config = QualityConfig(
+        min_chunk_length=20,
+        # Enable semantic deduplication
+        enable_semantic_dedup=True,
+        semantic_threshold=0.85,  # 85% similarity threshold
+        embeddings_model_path="sentence-transformers/all-MiniLM-L6-v2",
+        # Optionally disable fuzzy dedup to rely only on semantic
+        enable_fuzzy_dedup=False,
+        # Enable DLQ for audit trail
+        enable_dlq=True,
+        dlq_path="semantic_dedup_log.db"
+    )
+    
+    filter = TaparashFilter(config)
+    results = filter.process_batch(texts)
+    
+    # Show semantic duplicates
+    print("Semantically similar texts rejected:")
+    for result in results.rejected:
+        if result.reason_code == "SEMANTIC_DUPLICATE":
+            print(f"  Similarity: {result.metadata['similarity_score']:.3f}")
+            print(f"  Text: {result.text[:60]}...")
+    
+    return results.accepted
+
+# Example usage
+texts = [
+    "Machine learning is transforming software development",
+    "AI and ML are revolutionizing how we build software",  # Semantically similar!
+    "The weather today is sunny and warm",  # Different topic
+    "Artificial intelligence is changing software engineering",  # Similar to first
+]
+
+accepted = process_with_semantic_dedup(texts)
+print(f"Accepted {len(accepted)} unique texts")
+```
+
+### Example 5: Large-Scale Parallel Processing (Phase 2)
+
+```python
+from taparash import TaparashFilter, QualityConfig
+import time
+
+def process_large_dataset(documents, parallel=True):
+    """Process large dataset with parallel workers."""
+    
+    config = QualityConfig(
+        min_chunk_length=50,
+        batch_size=500,  # Process 500 chunks per batch
+        parallel_workers=8,  # Use 8 parallel workers
+        enable_pii_masking=True,
+        enable_entropy_check=True,
+        enable_exact_dedup=True,
+        enable_fuzzy_dedup=True,
+        enable_dlq=True,
+        dlq_path="large_scale_processing.db"
+    )
+    
+    filter = TaparashFilter(config)
+    
+    # Split documents into chunks
+    chunks = []
+    for doc in documents:
+        chunks.extend(split_into_chunks(doc, max_size=800))
+    
+    print(f"Processing {len(chunks)} chunks...")
+    start = time.time()
+    
+    # Use parallel processing for large batches
+    results = filter.process_batch(chunks, use_parallel=parallel)
+    
+    elapsed = time.time() - start
+    throughput = len(chunks) / elapsed
+    
+    print(f"Completed in {elapsed:.2f}s ({throughput:.0f} chunks/sec)")
+    print(f"Accepted: {len(results.accepted)} ({results.acceptance_rate:.1f}%)")
+    print(f"Rejected: {len(results.rejected)}")
+    
+    filter.print_stats()
+    
+    return results.accepted
+
+# Process 10,000+ chunks efficiently
+large_dataset = load_documents("./data")
+clean_chunks = process_large_dataset(large_dataset, parallel=True)
+```
+
 ---
 
 ## 🛠️ Development
@@ -766,12 +942,12 @@ python demo_deduplication.py
 - [x] Main processing pipeline
 - [x] Statistics tracking
 
-### 🔄 Phase 2 (v0.2.0 - In Progress)
-- [ ] Dead Letter Queue with SQLite
-- [ ] Local MiniLM embeddings
-- [ ] Semantic deduplication (vector-based)
-- [ ] Batch processing optimization
-- [ ] Parallel processing support
+### ✅ Phase 2 (v0.2.0 - Completed)
+- [x] Dead Letter Queue with SQLite
+- [x] Local MiniLM embeddings
+- [x] Semantic deduplication (vector-based)
+- [x] Batch processing optimization
+- [x] Parallel processing support
 
 ### 🔮 Phase 3 (v0.3.0 - Planned)
 - [ ] Local Cross-Encoder NLI model

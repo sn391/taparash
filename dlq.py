@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Optional, List, Dict
 from dataclasses import asdict
 
-from taparash.config import FilterResult
+try:
+    from taparash.config import FilterResult
+except ImportError:
+    from config import FilterResult
 
 
 class DeadLetterQueue:

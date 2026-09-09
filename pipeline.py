@@ -1,11 +1,23 @@
 """Main processing pipeline for Taparash filtering."""
 
-from typing import List, Optional
-from taparash.config import QualityConfig, FilterResult, BatchResult
-from taparash.core.entropy import shannon_entropy, is_gibberish
-from taparash.core.deduplication import ExactDeduplicator, MinHashDeduplicator
-from taparash.core.pii import PIIMasker
-from taparash.dlq import DeadLetterQueue
+from typing import List, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from threading import Lock
+
+try:
+    # Try package import first (when installed via pip)
+    from taparash.config import QualityConfig, FilterResult, BatchResult
+    from taparash.core.entropy import shannon_entropy, is_gibberish
+    from taparash.core.deduplication import ExactDeduplicator, MinHashDeduplicator
+    from taparash.core.pii import PIIMasker
+    from taparash.dlq import DeadLetterQueue
+except ImportError:
+    # Fall back to local imports (for development)
+    from config import QualityConfig, FilterResult, BatchResult
+    from core.entropy import shannon_entropy, is_gibberish
+    from core.deduplication import ExactDeduplicator, MinHashDeduplicator
+    from core.pii import PIIMasker
+    from dlq import DeadLetterQueue
 
 # Optional: Import semantic deduplication (requires sentence-transformers)
 try:
@@ -46,6 +58,10 @@ class TaparashFilter:
         self._init_deduplicators()
         self._init_semantic_dedup()
         self._init_dlq()
+
+        # Thread safety for parallel processing
+        self._dedup_lock = Lock()
+        self._stats_lock = Lock()
 
         # Statistics
         self.stats = {
@@ -129,13 +145,37 @@ class TaparashFilter:
             FilterResult with validation status and reason
         """
         original_text = text
-        self.stats["total_processed"] += 1
 
+        with self._stats_lock:
+            self.stats["total_processed"] += 1
+
+        # Process stateless gates
+        processed_text, pii_matches, rejection = self._process_stateless_gates(text, original_text)
+
+        if rejection:
+            return rejection
+
+        # Process stateful gates
+        return self._process_stateful_gates(processed_text, original_text, pii_matches)
+
+    def _process_stateless_gates(self, text: str, original_text: str) -> Optional[Tuple[str, List, Optional[FilterResult]]]:
+        """
+        Process stateless gates (length, PII, entropy) that can run in parallel.
+
+        Args:
+            text: Input text
+            original_text: Original unmodified text
+
+        Returns:
+            Tuple of (processed_text, pii_matches, rejection_result)
+            If rejection_result is not None, the chunk was rejected
+        """
         # Gate 1: Length validation
         text_length = len(text)
         if text_length < self.config.min_chunk_length:
-            self.stats["rejected_length"] += 1
-            return FilterResult(
+            with self._stats_lock:
+                self.stats["rejected_length"] += 1
+            return None, [], FilterResult(
                 text=text,
                 original_text=original_text,
                 is_valid=False,
@@ -145,8 +185,9 @@ class TaparashFilter:
             )
 
         if text_length > self.config.max_chunk_length:
-            self.stats["rejected_length"] += 1
-            return FilterResult(
+            with self._stats_lock:
+                self.stats["rejected_length"] += 1
+            return None, [], FilterResult(
                 text=text,
                 original_text=original_text,
                 is_valid=False,
@@ -160,12 +201,13 @@ class TaparashFilter:
         if self.pii_masker:
             text, pii_matches = self.pii_masker.mask(text)
 
-        # Gate 3: Entropy check (gibberish detection)
+        # Gate 3: Entropy check
         if self.config.enable_entropy_check:
             entropy = shannon_entropy(text)
             if is_gibberish(text, threshold=self.config.entropy_threshold):
-                self.stats["rejected_entropy"] += 1
-                return FilterResult(
+                with self._stats_lock:
+                    self.stats["rejected_entropy"] += 1
+                return None, [], FilterResult(
                     text=text,
                     original_text=original_text,
                     is_valid=False,
@@ -177,60 +219,73 @@ class TaparashFilter:
                     }
                 )
 
+        # Passed all stateless gates
+        return text, pii_matches, None
+
+    def _process_stateful_gates(self, text: str, original_text: str, pii_matches: List) -> FilterResult:
+        """
+        Process stateful gates (deduplication) that must run sequentially.
+
+        Args:
+            text: Processed text
+            original_text: Original text
+            pii_matches: List of PII matches from masking
+
+        Returns:
+            FilterResult
+        """
         # Gate 4: Exact deduplication
         if self.exact_dedup:
-            if not self.exact_dedup.add(text):
-                self.stats["rejected_exact_duplicate"] += 1
-                return FilterResult(
-                    text=text,
-                    original_text=original_text,
-                    is_valid=False,
-                    reason_code="EXACT_DUPLICATE",
-                    reason_detail="Exact duplicate detected (SHA-256 match)",
-                    metadata={"pii_masked_count": len(pii_matches)}
-                )
+            with self._dedup_lock:
+                if not self.exact_dedup.add(text):
+                    self.stats["rejected_exact_duplicate"] += 1
+                    return FilterResult(
+                        text=text,
+                        original_text=original_text,
+                        is_valid=False,
+                        reason_code="EXACT_DUPLICATE",
+                        reason_detail="Exact duplicate detected (SHA-256 match)",
+                        metadata={"pii_masked_count": len(pii_matches)}
+                    )
 
         # Gate 5: Fuzzy deduplication
         if self.fuzzy_dedup:
-            is_unique, similar_idx = self.fuzzy_dedup.add(text)
-            if not is_unique:
-                self.stats["rejected_fuzzy_duplicate"] += 1
-                return FilterResult(
-                    text=text,
-                    original_text=original_text,
-                    is_valid=False,
-                    reason_code="FUZZY_DUPLICATE",
-                    reason_detail=f"Near-duplicate detected (similar to index {similar_idx})",
-                    metadata={
-                        "similar_to_index": similar_idx,
-                        "threshold": self.config.dedup_threshold,
-                        "pii_masked_count": len(pii_matches)
-                    }
-                )
+            with self._dedup_lock:
+                is_unique, similar_idx = self.fuzzy_dedup.add(text)
+                if not is_unique:
+                    self.stats["rejected_fuzzy_duplicate"] += 1
+                    return FilterResult(
+                        text=text,
+                        original_text=original_text,
+                        is_valid=False,
+                        reason_code="FUZZY_DUPLICATE",
+                        reason_detail=f"Near-duplicate detected (similar to index {similar_idx})",
+                        metadata={
+                            "similar_to_index": similar_idx,
+                            "threshold": self.config.dedup_threshold,
+                            "pii_masked_count": len(pii_matches)
+                        }
+                    )
 
         # Gate 6: Semantic deduplication
         if self.semantic_dedup:
-            is_unique, similar_idx, similarity = self.semantic_dedup.add(text)
-            if not is_unique:
-                self.stats["rejected_semantic_duplicate"] += 1
-                return FilterResult(
-                    text=text,
-                    original_text=original_text,
-                    is_valid=False,
-                    reason_code="SEMANTIC_DUPLICATE",
-                    reason_detail=f"Semantically similar to index {similar_idx} (similarity: {similarity:.3f})",
-                    metadata={
-                        "similar_to_index": similar_idx,
-                        "similarity_score": similarity,
-                        "threshold": self.config.semantic_threshold,
-                        "pii_masked_count": len(pii_matches)
-                    }
-                )
-
-        # Gate 7: Contradiction detection (not yet implemented)
-        if self.config.check_contradictions:
-            # TODO: Implement contradiction detection using local NLI model
-            pass
+            with self._dedup_lock:
+                is_unique, similar_idx, similarity = self.semantic_dedup.add(text)
+                if not is_unique:
+                    self.stats["rejected_semantic_duplicate"] += 1
+                    return FilterResult(
+                        text=text,
+                        original_text=original_text,
+                        is_valid=False,
+                        reason_code="SEMANTIC_DUPLICATE",
+                        reason_detail=f"Semantically similar to index {similar_idx} (similarity: {similarity:.3f})",
+                        metadata={
+                            "similar_to_index": similar_idx,
+                            "similarity_score": similarity,
+                            "threshold": self.config.semantic_threshold,
+                            "pii_masked_count": len(pii_matches)
+                        }
+                    )
 
         # All gates passed
         self.stats["accepted"] += 1
@@ -246,24 +301,106 @@ class TaparashFilter:
             }
         )
 
-    def process_batch(self, texts: List[str]) -> BatchResult:
+    def process_batch(self, texts: List[str], use_parallel: bool = False) -> BatchResult:
         """
-        Process a batch of text chunks.
+        Process a batch of text chunks with optimized batching.
 
         Args:
             texts: List of input text strings
+            use_parallel: Enable parallel processing (default: False for compatibility)
 
         Returns:
             BatchResult with accepted and rejected chunks
         """
+        if use_parallel and self.config.parallel_workers > 1:
+            return self._process_batch_parallel(texts)
+        else:
+            return self._process_batch_sequential(texts)
+
+    def _process_batch_sequential(self, texts: List[str]) -> BatchResult:
+        """Process batch sequentially (original behavior)."""
         result = BatchResult()
 
+        with self._stats_lock:
+            self.stats["total_processed"] += len(texts)
+
         for text in texts:
-            filter_result = self.process_single(text)
-            if filter_result.is_valid:
-                result.accepted.append(filter_result)
+            original_text = text
+
+            # Process stateless gates
+            processed_text, pii_matches, rejection = self._process_stateless_gates(text, original_text)
+
+            if rejection:
+                result.rejected.append(rejection)
             else:
-                result.rejected.append(filter_result)
+                # Process stateful gates
+                filter_result = self._process_stateful_gates(processed_text, original_text, pii_matches)
+                if filter_result.is_valid:
+                    result.accepted.append(filter_result)
+                else:
+                    result.rejected.append(filter_result)
+
+        # Log rejected chunks to DLQ
+        if self.dlq and result.rejected:
+            self.dlq.log_batch(result.rejected)
+
+        return result
+
+    def _process_batch_parallel(self, texts: List[str]) -> BatchResult:
+        """
+        Process batch with parallel workers for stateless gates.
+
+        Stateless gates (length, PII, entropy) run in parallel.
+        Stateful gates (deduplication) run sequentially with locks.
+        """
+        result = BatchResult()
+
+        with self._stats_lock:
+            self.stats["total_processed"] += len(texts)
+
+        # Split into batches based on batch_size
+        batch_size = self.config.batch_size
+        num_batches = (len(texts) + batch_size - 1) // batch_size
+
+        for batch_idx in range(num_batches):
+            start_idx = batch_idx * batch_size
+            end_idx = min(start_idx + batch_size, len(texts))
+            batch_texts = texts[start_idx:end_idx]
+
+            # Process stateless gates in parallel
+            stateless_results = {}
+            with ThreadPoolExecutor(max_workers=self.config.parallel_workers) as executor:
+                futures = {
+                    executor.submit(self._process_stateless_gates, text, text): (idx, text)
+                    for idx, text in enumerate(batch_texts)
+                }
+
+                for future in as_completed(futures):
+                    idx, original_text = futures[future]
+                    try:
+                        stateless_results[idx] = future.result()
+                    except Exception as e:
+                        # Handle any processing errors
+                        stateless_results[idx] = (None, [], FilterResult(
+                            text=original_text,
+                            original_text=original_text,
+                            is_valid=False,
+                            reason_code="PROCESSING_ERROR",
+                            reason_detail=f"Error during processing: {str(e)}",
+                            metadata={}
+                        ))
+
+            # Process stateful gates sequentially in original order
+            for idx in sorted(stateless_results.keys()):
+                processed_text, pii_matches, rejection = stateless_results[idx]
+                if rejection:
+                    result.rejected.append(rejection)
+                else:
+                    filter_result = self._process_stateful_gates(processed_text, batch_texts[idx], pii_matches)
+                    if filter_result.is_valid:
+                        result.accepted.append(filter_result)
+                    else:
+                        result.rejected.append(filter_result)
 
         # Log rejected chunks to DLQ
         if self.dlq and result.rejected:
