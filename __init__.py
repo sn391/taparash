@@ -1,33 +1,82 @@
-"""Taparash - Zero-LLM Data Quality & Compliance Gateway."""
+"""
+Taparash - Zero-LLM Data Quality & Compliance Gateway for RAG Systems.
 
-from taparash.core import (
-    shannon_entropy,
-    is_gibberish,
-    sha256_hash,
-    ExactDeduplicator,
-    MinHashDeduplicator,
-    create_shingles,
-    create_word_shingles,
-    deduplicate_exact,
-    deduplicate_fuzzy,
-    PIIMasker,
-    PIIMatch,
-    mask_pii,
-)
-from taparash.config import QualityConfig, FilterResult, BatchResult
-from taparash.pipeline import TaparashFilter
-from taparash.dlq import DeadLetterQueue
+100% offline, air-gapped data quality filtering with PII masking,
+deduplication, semantic analysis, and contradiction detection.
+"""
 
-# Optional semantic components
+__version__ = "0.3.0"
+
+# Core imports
 try:
-    from taparash.engines import LocalEmbedder
-    __all_engines__ = ["LocalEmbedder"]
+    from core import (
+        shannon_entropy,
+        is_gibberish,
+        sha256_hash,
+        ExactDeduplicator,
+        MinHashDeduplicator,
+        create_shingles,
+        create_word_shingles,
+        deduplicate_exact,
+        deduplicate_fuzzy,
+        PIIMasker,
+        PIIMatch,
+        mask_pii,
+    )
 except ImportError:
-    __all_engines__ = []
+    # Alternative import path when installed via pip
+    from taparash.core import (
+        shannon_entropy,
+        is_gibberish,
+        sha256_hash,
+        ExactDeduplicator,
+        MinHashDeduplicator,
+        create_shingles,
+        create_word_shingles,
+        deduplicate_exact,
+        deduplicate_fuzzy,
+        PIIMasker,
+        PIIMatch,
+        mask_pii,
+    )
 
-__version__ = "0.1.0"
+# Main components
+try:
+    from config import QualityConfig, FilterResult, BatchResult
+    from pipeline import TaparashFilter
+    from dlq import DeadLetterQueue
+    from profiler import TaparashProfiler, benchmark_pipeline, compare_configurations
+except ImportError:
+    from taparash.config import QualityConfig, FilterResult, BatchResult
+    from taparash.pipeline import TaparashFilter
+    from taparash.dlq import DeadLetterQueue
+    from taparash.profiler import TaparashProfiler, benchmark_pipeline, compare_configurations
+
+# Optional Phase 2 & 3 components (require sentence-transformers)
+__all_optional__ = []
+try:
+    from engines import LocalEmbedder, SemanticDeduplicator
+    __all_optional__.extend(["LocalEmbedder", "SemanticDeduplicator"])
+except ImportError:
+    try:
+        from taparash.engines import LocalEmbedder, SemanticDeduplicator
+        __all_optional__.extend(["LocalEmbedder", "SemanticDeduplicator"])
+    except ImportError:
+        pass
+
+try:
+    from engines.nli import LocalNLI, ContradictionDetector, CoherenceValidator
+    __all_optional__.extend(["LocalNLI", "ContradictionDetector", "CoherenceValidator"])
+except ImportError:
+    try:
+        from taparash.engines.nli import LocalNLI, ContradictionDetector, CoherenceValidator
+        __all_optional__.extend(["LocalNLI", "ContradictionDetector", "CoherenceValidator"])
+    except ImportError:
+        pass
 
 __all__ = [
+    # Version
+    "__version__",
     # Core entropy
     "shannon_entropy",
     "is_gibberish",
@@ -43,12 +92,15 @@ __all__ = [
     "PIIMasker",
     "PIIMatch",
     "mask_pii",
-    # Config
+    # Config & Results
     "QualityConfig",
     "FilterResult",
     "BatchResult",
-    # Pipeline
+    # Main Pipeline
     "TaparashFilter",
-    # DLQ
+    # Phase 2: DLQ & Profiling
     "DeadLetterQueue",
-] + __all_engines__
+    "TaparashProfiler",
+    "benchmark_pipeline",
+    "compare_configurations",
+] + __all_optional__
