@@ -7,72 +7,42 @@ deduplication, semantic analysis, and contradiction detection.
 
 __version__ = "0.3.0"
 
-# Core imports
-try:
-    from core import (
-        shannon_entropy,
-        is_gibberish,
-        sha256_hash,
-        ExactDeduplicator,
-        MinHashDeduplicator,
-        create_shingles,
-        create_word_shingles,
-        deduplicate_exact,
-        deduplicate_fuzzy,
-        PIIMasker,
-        PIIMatch,
-        mask_pii,
-    )
-except ImportError:
-    # Alternative import path when installed via pip
-    from taparash.core import (
-        shannon_entropy,
-        is_gibberish,
-        sha256_hash,
-        ExactDeduplicator,
-        MinHashDeduplicator,
-        create_shingles,
-        create_word_shingles,
-        deduplicate_exact,
-        deduplicate_fuzzy,
-        PIIMasker,
-        PIIMatch,
-        mask_pii,
-    )
+# Core imports - direct from modules
+from core import (
+    shannon_entropy,
+    is_gibberish,
+    sha256_hash,
+    ExactDeduplicator,
+    MinHashDeduplicator,
+    create_shingles,
+    create_word_shingles,
+    deduplicate_exact,
+    deduplicate_fuzzy,
+    PIIMasker,
+    PIIMatch,
+    mask_pii,
+)
 
-# Main components
-try:
-    from config import QualityConfig, FilterResult, BatchResult
-    from pipeline import TaparashFilter
-    from dlq import DeadLetterQueue
-    from profiler import TaparashProfiler, benchmark_pipeline, compare_configurations
-except ImportError:
-    from taparash.config import QualityConfig, FilterResult, BatchResult
-    from taparash.pipeline import TaparashFilter
-    from taparash.dlq import DeadLetterQueue
-    from taparash.profiler import TaparashProfiler, benchmark_pipeline, compare_configurations
+# Main components - direct imports
+from config import QualityConfig, FilterResult, BatchResult
+from pipeline import TaparashFilter
+from dlq import DeadLetterQueue
+from profiler import TaparashProfiler, benchmark_pipeline, compare_configurations
 
 # Optional Phase 2 & 3 components (require sentence-transformers)
 __all_optional__ = []
+
 try:
     from engines import LocalEmbedder, SemanticDeduplicator
     __all_optional__.extend(["LocalEmbedder", "SemanticDeduplicator"])
 except ImportError:
-    try:
-        from taparash.engines import LocalEmbedder, SemanticDeduplicator
-        __all_optional__.extend(["LocalEmbedder", "SemanticDeduplicator"])
-    except ImportError:
-        pass
+    pass
 
 try:
     from engines.nli import LocalNLI, ContradictionDetector, CoherenceValidator
     __all_optional__.extend(["LocalNLI", "ContradictionDetector", "CoherenceValidator"])
 except ImportError:
-    try:
-        from taparash.engines.nli import LocalNLI, ContradictionDetector, CoherenceValidator
-        __all_optional__.extend(["LocalNLI", "ContradictionDetector", "CoherenceValidator"])
-    except ImportError:
-        pass
+    pass
 
 __all__ = [
     # Version

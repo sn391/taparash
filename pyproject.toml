@@ -73,18 +73,12 @@ Documentation = "https://github.com/sn391/taparash#readme"
 Changelog = "https://github.com/sn391/taparash/releases"
 
 [tool.setuptools]
-# Package is at repository root
-py-modules = [
-    "__init__",
-    "config",
-    "pipeline",
-    "dlq",
-]
+# Explicitly declare package mapping
+packages = ["taparash", "taparash.core", "taparash.engines"]
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["core*", "engines*"]
-exclude = ["tests*", "taparash"]
+[tool.setuptools.package-dir]
+# Map taparash_pkg directory to taparash package name
+taparash = "taparash_pkg"
 
 [tool.setuptools.package-data]
 taparash = ["py.typed"]
