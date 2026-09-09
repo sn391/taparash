@@ -20,34 +20,34 @@ print("Testing Taparash installation...\n")
 
 try:
     import taparash
-    print(f"✓ Import successful: Taparash v{taparash.__version__}")
+    print(f"[OK] Import successful: Taparash v{taparash.__version__}")
 except ImportError as e:
-    print(f"✗ Import failed: {e}")
+    print(f"[FAIL] Import failed: {e}")
     sys.exit(1)
 
 try:
     from taparash import TaparashFilter, QualityConfig
-    print("✓ Core imports work")
+    print("[OK] Core imports work")
 except ImportError as e:
-    print(f"✗ Core imports failed: {e}")
+    print(f"[FAIL] Core imports failed: {e}")
     sys.exit(1)
 
 try:
     config = QualityConfig(enable_dlq=False)
     app = TaparashFilter(config)
-    print("✓ TaparashFilter initialization works")
+    print("[OK] TaparashFilter initialization works")
 except Exception as e:
-    print(f"✗ Initialization failed: {e}")
+    print(f"[FAIL] Initialization failed: {e}")
     sys.exit(1)
 
 try:
     chunks = ['This is a test chunk with sufficient length', 'Too short', 'Another valid test chunk']
     results = app.process_batch(chunks)
-    print(f"✓ Processing works: {results.total} chunks processed")
+    print(f"[OK] Processing works: {results.total} chunks processed")
     print(f"  - Accepted: {len(results.accepted)}")
     print(f"  - Rejected: {len(results.rejected)}")
 except Exception as e:
-    print(f"✗ Processing failed: {e}")
+    print(f"[FAIL] Processing failed: {e}")
     sys.exit(1)
 
 print("\n" + "="*60)
