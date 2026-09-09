@@ -28,6 +28,15 @@ except ImportError:
     LocalEmbedder = None
     SemanticDeduplicator = None
 
+# Optional: Import NLI for contradiction detection (requires sentence-transformers)
+try:
+    from taparash.engines.nli import LocalNLI, ContradictionDetector
+    NLI_AVAILABLE = True
+except ImportError:
+    NLI_AVAILABLE = False
+    LocalNLI = None
+    ContradictionDetector = None
+
 
 class TaparashFilter:
     """
@@ -57,6 +66,7 @@ class TaparashFilter:
         self._init_pii_masker()
         self._init_deduplicators()
         self._init_semantic_dedup()
+        self._init_contradiction_detector()
         self._init_dlq()
 
         # Thread safety for parallel processing
@@ -126,6 +136,29 @@ class TaparashFilter:
             )
         else:
             self.semantic_dedup = None
+
+    def _init_contradiction_detector(self):
+        """Initialize contradiction detector component."""
+        if self.config.check_contradictions:
+            if not NLI_AVAILABLE:
+                raise ImportError(
+                    "sentence-transformers is required for contradiction detection. "
+                    "Install with: pip install sentence-transformers"
+                )
+
+            # Initialize NLI model and contradiction detector
+            nli_model = LocalNLI(
+                model_name=self.config.nli_model_path,
+                cache_dir=None  # Use default cache
+            )
+            self.contradiction_detector = ContradictionDetector(
+                nli_model=nli_model,
+                threshold=self.config.contradiction_threshold,
+                store_texts=True,
+                max_context_size=100  # Keep last 100 chunks for context
+            )
+        else:
+            self.contradiction_detector = None
 
     def _init_dlq(self):
         """Initialize Dead Letter Queue for audit logging."""
@@ -287,6 +320,26 @@ class TaparashFilter:
                         }
                     )
 
+        # Gate 7: Contradiction detection
+        if self.contradiction_detector:
+            with self._dedup_lock:
+                is_valid, contradicting_idx, confidence = self.contradiction_detector.add(text)
+                if not is_valid:
+                    self.stats["rejected_contradiction"] += 1
+                    return FilterResult(
+                        text=text,
+                        original_text=original_text,
+                        is_valid=False,
+                        reason_code="CONTRADICTION",
+                        reason_detail=f"Contradicts text at index {contradicting_idx} (confidence: {confidence:.3f})",
+                        metadata={
+                            "contradicting_index": contradicting_idx,
+                            "contradiction_confidence": confidence,
+                            "threshold": self.config.contradiction_threshold,
+                            "pii_masked_count": len(pii_matches)
+                        }
+                    )
+
         # All gates passed
         self.stats["accepted"] += 1
         return FilterResult(
@@ -418,6 +471,9 @@ class TaparashFilter:
 
         if self.semantic_dedup:
             self.semantic_dedup.reset()
+
+        if self.contradiction_detector:
+            self.contradiction_detector.reset()
 
         self.stats = {
             "total_processed": 0,

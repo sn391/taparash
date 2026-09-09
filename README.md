@@ -2,7 +2,7 @@
 
 [![Python Version](https://img.shields.io/badge/python-3.9%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-0.2.0-green.svg)](https://github.com/sn391/taparash)
+[![Version](https://img.shields.io/badge/version-0.3.0-green.svg)](https://github.com/sn391/taparash)
 [![Code Style](https://img.shields.io/badge/code%20style-PEP8-blue.svg)](https://www.python.org/dev/peps/pep-0008/)
 
 > **Air-Gapped, Zero-LLM Data Quality & Compliance Gateway for RAG Systems**
@@ -47,9 +47,11 @@ Named after **Tapa Rash ** (meaning "Black Hill" in Kurdish) representing solid 
 - Batch processing optimization
 - Parallel processing support
 
-#### **NLI Layer** (Coming in PR3)
+#### **NLI Layer** (Phase 3 - Completed)
 - Local Cross-Encoder for contradiction detection
-- Context coherence validation
+- Context coherence validation  
+- Performance profiling tools
+- Advanced audit logging
 
 ---
 
@@ -222,9 +224,9 @@ Taparash implements a multi-gate filtering pipeline where each chunk passes thro
                          │ PASS
                          ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  GATE 7: Contradiction Detection (Coming in PR3)             │
-│  ⏳ Local Cross-Encoder NLI                                  │
-│  ⏳ Context coherence validation                              │
+│  GATE 7: Contradiction Detection (Phase 3)                   │
+│  ✓ Local Cross-Encoder NLI                                   │
+│  ✓ Context coherence validation                              │
 └────────────────────────┬────────────────────────────────────┘
                          │ PASS
                          ▼
@@ -277,9 +279,10 @@ config = QualityConfig(
     enable_semantic_dedup=False,      # Requires local embeddings
     semantic_threshold=0.90,          # Vector similarity threshold
     
-    # Contradiction detection (PR3)
+    # Contradiction detection (Phase 3)
     check_contradictions=False,       # Requires NLI model
-    contradiction_threshold=0.7,      # NLI confidence threshold
+    contradiction_threshold=0.7,      # NLI confidence threshold (0.0-1.0)
+    nli_model_path="cross-encoder/nli-deberta-v3-base",  # NLI model
     
     # Processing options
     batch_size=100,                   # Batch processing size (chunks per batch)
@@ -475,8 +478,8 @@ pii_violations = dlq.get_pii_violations(limit=100)
 | `HIGH_ENTROPY` | Entropy exceeds threshold (gibberish) | Gate 3 |
 | `EXACT_DUPLICATE` | SHA-256 hash match | Gate 4 |
 | `FUZZY_DUPLICATE` | MinHash similarity match | Gate 5 |
-| `SEMANTIC_DUPLICATE` | Vector similarity match (PR2) | Gate 6 |
-| `CONTRADICTION` | NLI contradiction detected (PR3) | Gate 7 |
+| `SEMANTIC_DUPLICATE` | Vector similarity match (Phase 2) | Gate 6 |
+| `CONTRADICTION` | NLI contradiction detected (Phase 3) | Gate 7 |
 
 ### Processing Flow
 
@@ -882,6 +885,128 @@ large_dataset = load_documents("./data")
 clean_chunks = process_large_dataset(large_dataset, parallel=True)
 ```
 
+### Example 6: Contradiction Detection (Phase 3)
+
+```python
+from taparash import TaparashFilter, QualityConfig
+
+def detect_contradictions(texts):
+    """
+    Detect contradictory statements using local NLI model.
+    Requires: pip install sentence-transformers
+    """
+    
+    config = QualityConfig(
+        min_chunk_length=20,
+        # Enable contradiction detection
+        check_contradictions=True,
+        contradiction_threshold=0.75,  # 75% confidence threshold
+        nli_model_path="cross-encoder/nli-deberta-v3-base",
+        # Optional: disable other filters to focus on contradictions
+        enable_entropy_check=True,
+        enable_exact_dedup=True,
+        enable_fuzzy_dedup=False,
+        enable_semantic_dedup=False,
+        # Enable DLQ for audit trail
+        enable_dlq=True,
+        dlq_path="contradiction_audit.db"
+    )
+    
+    filter = TaparashFilter(config)
+    results = filter.process_batch(texts)
+    
+    # Show contradictions
+    print("Contradictory statements detected:")
+    for result in results.rejected:
+        if result.reason_code == "CONTRADICTION":
+            print(f"  Confidence: {result.metadata['contradiction_confidence']:.3f}")
+            print(f"  Text: {result.text[:60]}...")
+            print(f"  Contradicts text at index: {result.metadata['contradicting_index']}")
+            print()
+    
+    return results.accepted
+
+# Example usage with business metrics
+metrics = [
+    "Q1 revenue increased by 20% year over year.",
+    "Customer satisfaction scores improved significantly.",
+    "Revenue declined in Q1 compared to last year.",  # Contradicts first!
+    "Product launch was successful with positive feedback.",
+    "The product launch failed to meet expectations.",  # Contradicts previous!
+]
+
+validated = detect_contradictions(metrics)
+print(f"Validated {len(validated)} non-contradictory statements")
+```
+
+### Example 7: Performance Profiling (Phase 3)
+
+```python
+from taparash import TaparashFilter, QualityConfig
+from taparash.profiler import TaparashProfiler, benchmark_pipeline, compare_configurations
+
+# Profile a single run
+def profile_pipeline():
+    """Profile pipeline performance."""
+    
+    profiler = TaparashProfiler(enabled=True)
+    
+    config = QualityConfig(
+        min_chunk_length=20,
+        enable_pii_masking=True,
+        enable_entropy_check=True,
+        enable_exact_dedup=True,
+        enable_fuzzy_dedup=True,
+        enable_semantic_dedup=False,
+        enable_dlq=False
+    )
+    
+    pipeline = TaparashFilter(config)
+    test_data = [f"Test chunk {i} with content" for i in range(1000)]
+    
+    profiler.start_batch()
+    results = pipeline.process_batch(test_data)
+    profiler.end_batch(len(test_data))
+    
+    # Print detailed performance report
+    profiler.print_report()
+    
+    # Save to JSON for analysis
+    profiler.save_report("profile_results.json")
+
+# Benchmark multiple configurations
+def benchmark_configs():
+    """Compare different configuration performances."""
+    
+    test_data = [f"Chunk {i} content" for i in range(500)]
+    
+    configs = [
+        ("Fast", lambda: TaparashFilter(QualityConfig(
+            enable_fuzzy_dedup=False,
+            enable_semantic_dedup=False,
+            check_contradictions=False
+        ))),
+        ("Balanced", lambda: TaparashFilter(QualityConfig(
+            enable_fuzzy_dedup=True,
+            enable_semantic_dedup=False,
+            check_contradictions=False
+        ))),
+        ("Complete", lambda: TaparashFilter(QualityConfig(
+            enable_fuzzy_dedup=True,
+            enable_semantic_dedup=True,
+            check_contradictions=True,
+            embeddings_model_path="sentence-transformers/all-MiniLM-L6-v2",
+            nli_model_path="cross-encoder/nli-deberta-v3-base"
+        )))
+    ]
+    
+    results = compare_configurations(configs, test_data, iterations=3)
+    print(f"Best configuration: {results['best_configuration']}")
+
+profile_pipeline()
+benchmark_configs()
+```
+
 ---
 
 ## 🛠️ Development
@@ -949,12 +1074,12 @@ python demo_deduplication.py
 - [x] Batch processing optimization
 - [x] Parallel processing support
 
-### 🔮 Phase 3 (v0.3.0 - Planned)
-- [ ] Local Cross-Encoder NLI model
-- [ ] Contradiction detection
-- [ ] Context coherence validation
-- [ ] Advanced audit logging
-- [ ] Performance profiling tools
+### ✅ Phase 3 (v0.3.0 - Completed)
+- [x] Local Cross-Encoder NLI model
+- [x] Contradiction detection
+- [x] Context coherence validation
+- [x] Advanced audit logging (via DLQ)
+- [x] Performance profiling tools
 
 ### 🚀 Future Enhancements
 - [ ] Multi-language support
