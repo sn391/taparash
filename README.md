@@ -9,7 +9,7 @@
 
 Taparash is a high-performance, 100% offline data quality and compliance gateway designed to clean, deduplicate, and validate text data before it enters your Vector Database or Retrieval-Augmented Generation (RAG) pipeline. Built for privacy-first enterprise environments with **zero internet dependencies and zero LLM overhead**.
 
-Named after **Tapa Rash ** (meaning "Black Hill" in Kurdish) representing solid roots, unyielding strength, and local sovereignty.
+Named after **Tapa Rash** (meaning "Black Hill" in Kurdish) representing solid roots, unyielding strength, and local sovereignty.
 
 ---
 
@@ -1157,7 +1157,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - **Issues:** [GitHub Issues](https://github.com/sn391/taparash/issues)
 - **Discussions:** [GitHub Discussions](https://github.com/sn391/taparash/discussions)
-- **Email:** [sn391@yahoo.com](mailto:sn391@yahoo.com)
+- **Email:** [Semko Kermashani](mailto:sn391@yahoo.com)
 
 ---
 
