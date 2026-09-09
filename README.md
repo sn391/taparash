@@ -848,7 +848,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - Inspired by the need for privacy-first AI infrastructure
 - Built on proven algorithms: SHA-256, MinHash, Shannon Entropy
-- Named after **Tapa Rash ** symbolizing strength and sovereignty
+- Named after ** Tapa Rash ** symbolizing strength and sovereignty
 
 ---
 
