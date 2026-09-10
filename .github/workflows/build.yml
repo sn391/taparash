@@ -74,7 +74,7 @@ jobs:
 
     - name: Install from wheel
       run: |
-        pip install dist/*.whl
+        pip install --no-index --find-links dist taparash
 
     - name: Test import
       run: |

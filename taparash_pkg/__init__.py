@@ -27,7 +27,7 @@ from .core import (
 from .config import QualityConfig, FilterResult, BatchResult, DocumentChunk
 from .pipeline import TaparashFilter
 from .dlq import DeadLetterQueue
-from .profiler import TaparashProfiler, benchmark_pipeline, compare_configurations
+from .profiler import TaparashProfiler, benchmark_pipeline, compare_configurations, profile_comparison
 
 # Optional connectors (require taparash[connectors])
 __all_optional__ = []
@@ -82,4 +82,5 @@ __all__ = [
     "TaparashProfiler",
     "benchmark_pipeline",
     "compare_configurations",
+    "profile_comparison",
 ] + __all_optional__
