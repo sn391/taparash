@@ -26,6 +26,7 @@ from .core import (
 
 # Main components - relative imports
 from .config import QualityConfig, FilterResult, BatchResult, DocumentChunk
+from .config_io import load_config, save_config
 from .pipeline import TaparashFilter
 from .dlq import DeadLetterQueue
 from .profiler import TaparashProfiler, benchmark_pipeline, compare_configurations, profile_comparison
@@ -61,6 +62,27 @@ try:
 except ImportError:
     pass
 
+# Optional LangChain integration (require taparash[langchain])
+try:
+    from .integrations.langchain import TaparashDocumentTransformer
+    __all_optional__.extend(["TaparashDocumentTransformer"])
+except ImportError:
+    pass
+
+# Optional LlamaIndex integration (require taparash[llamaindex])
+try:
+    from .integrations.llamaindex import TaparashNodePostprocessor
+    __all_optional__.extend(["TaparashNodePostprocessor"])
+except ImportError:
+    pass
+
+# Optional Prometheus metrics exporter (require taparash[metrics])
+try:
+    from .metrics_exporter import TaparashCollector
+    __all_optional__.extend(["TaparashCollector"])
+except ImportError:
+    pass
+
 __all__ = [
     # Version
     "__version__",
@@ -87,6 +109,9 @@ __all__ = [
     "DocumentChunk",
     # Main Pipeline
     "TaparashFilter",
+    # Config I/O
+    "load_config",
+    "save_config",
     # Phase 2: DLQ & Profiling
     "DeadLetterQueue",
     "TaparashProfiler",

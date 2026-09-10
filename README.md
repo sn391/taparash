@@ -19,6 +19,10 @@ pip install taparash                   # core only
 pip install taparash[semantic]         # + semantic dedup & contradiction detection
 pip install taparash[connectors]       # + PDF / HTML document loaders
 pip install taparash[distributed]      # + Ray-based distributed processing
+pip install taparash[langchain]        # + LangChain BaseDocumentTransformer
+pip install taparash[llamaindex]       # + LlamaIndex BaseNodePostprocessor
+pip install taparash[api]              # + FastAPI REST server
+pip install taparash[metrics]          # + Prometheus metrics exporter
 pip install taparash[all]              # everything
 ```
 
@@ -87,6 +91,31 @@ Gates 6 and 7 require `pip install taparash[semantic]`.
 - `load_html(source)` → `List[DocumentChunk]` (trafilatura + BeautifulSoup fallback)
 - `DocumentChunk` carries `source_file`, `page_num`, `heading`, `is_table` metadata through the pipeline
 
+### Async API
+
+Both `process_single` and `process_batch` have async equivalents — safe to use in FastAPI handlers, async LangChain chains, or any other `async`/`await` context:
+
+```python
+import asyncio
+from taparash import TaparashFilter, QualityConfig
+
+f = TaparashFilter(QualityConfig())
+
+# Single chunk
+result = await f.aprocess_single(text)
+
+# Batch
+batch = await f.aprocess_batch(texts)
+
+# Fan out multiple batches concurrently
+results = await asyncio.gather(
+    f.aprocess_batch(batch_a),
+    f.aprocess_batch(batch_b),
+)
+```
+
+Dedup state is shared and thread-safe — concurrent calls accumulate into the same dedup index correctly.
+
 ### Observability
 ```python
 from taparash import QualityConfig, TaparashFilter
@@ -139,6 +168,10 @@ QualityConfig(
     pii_mask_credit_cards=True,
     pii_mask_ssn=True,
     pii_replacement_token="[REDACTED]",
+    # European PII (opt-in)
+    pii_mask_iban=False,        # IBAN with ISO 13616 mod-97 checksum validation
+    pii_mask_eu_vat=False,      # EU VAT numbers for all 27 member states + UK
+    pii_mask_eu_phone=False,    # UK/FR/DE local phone formats (no +CC prefix)
 
     # Semantic (requires taparash[semantic])
     enable_semantic_dedup=False,
@@ -181,6 +214,228 @@ class SpacyNERDetector:
 masker = PIIMasker()
 masker.register_detector(SpacyNERDetector(spacy.load("en_core_web_sm")))
 ```
+
+---
+
+## Config Files
+
+Config can be stored in `.yaml`/`.yml` or `.toml` — no Python required.
+
+**`pipeline.toml`**
+```toml
+min_chunk_length = 20
+max_chunk_length = 2000
+entropy_threshold = 4.5
+enable_fuzzy_dedup = false
+pii_mask_iban = true
+pii_mask_eu_vat = true
+enable_dlq = false
+```
+
+**`pipeline.yaml`**
+```yaml
+min_chunk_length: 20
+entropy_threshold: 4.5
+enable_pii_masking: true
+pii_mask_iban: true
+enable_dlq: false
+```
+
+```python
+from taparash import load_config, save_config
+
+config = load_config("pipeline.yaml")   # or .toml
+f = TaparashFilter(config)
+
+save_config(config, "pipeline.toml")    # serialize back out
+```
+
+TOML works without extra dependencies on Python 3.11+. YAML requires `pip install taparash[yaml]`.
+
+---
+
+## CLI
+
+```bash
+# Load settings from a config file (CLI flags override file values)
+taparash filter corpus.jsonl clean.jsonl --config pipeline.toml --stats
+
+# Filter a JSONL dataset
+taparash filter corpus.jsonl clean.jsonl --stats
+
+# Pipe from stdin
+cat raw.jsonl | taparash filter - --no-fuzzy --stats > clean.jsonl
+
+# Plain-text files (one chunk per line)
+taparash filter raw.txt clean.txt --format txt --min-length 50
+
+# PII masking only (no dedup / entropy / length)
+taparash mask raw.jsonl masked.jsonl
+
+# European PII opt-ins
+taparash filter corpus.jsonl clean.jsonl --pii-iban --pii-eu-vat --pii-eu-phone
+
+# Save rejected chunks for inspection
+taparash filter corpus.jsonl clean.jsonl --rejected rejected.jsonl --no-dlq
+
+# Version
+taparash version
+```
+
+Key flags for `filter`:
+
+| Flag | Effect |
+|------|--------|
+| `--no-pii` | Disable PII masking |
+| `--no-dedup` | Disable all deduplication |
+| `--no-fuzzy` | Disable MinHash dedup only |
+| `--no-entropy` | Disable gibberish filter |
+| `--pii-iban` | Enable IBAN detection |
+| `--pii-eu-vat` | Enable EU VAT detection |
+| `--pii-eu-phone` | Enable EU local phone detection |
+| `--rejected FILE` | Write rejected chunks (with reason) to FILE |
+| `--stats` | Print summary counts to stderr |
+| `--text-field FIELD` | JSON field containing the text (default: `text`) |
+
+---
+
+## LangChain Integration
+
+```bash
+pip install taparash[langchain]
+```
+
+```python
+from taparash.integrations.langchain import TaparashDocumentTransformer
+from taparash import QualityConfig
+
+transformer = TaparashDocumentTransformer(
+    config=QualityConfig(enable_pii_masking=True, enable_dlq=False),
+    add_filter_metadata=True,   # injects taparash_accepted / taparash_pii_masked into metadata
+)
+
+# Works anywhere a BaseDocumentTransformer is accepted
+clean_docs = transformer.transform_documents(raw_docs)
+```
+
+Drop it directly into an LCEL chain:
+
+```python
+chain = loader | transformer | embedder
+```
+
+`atransform_documents` is also available for async pipelines. Deduplication state accumulates across calls — create a new instance to reset between independent document sets.
+
+---
+
+## REST API
+
+```bash
+pip install taparash[api]
+
+# Start server (default: http://127.0.0.1:8000)
+taparash serve
+
+# With config file and custom port
+taparash serve --config pipeline.toml --host 0.0.0.0 --port 8080
+```
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Liveness probe |
+| `/stats` | GET | Cumulative pipeline statistics |
+| `/filter` | POST | Filter a batch — returns `accepted[]`, `rejected[]` with reason codes |
+| `/filter/single` | POST | Filter one chunk |
+| `/mask` | POST | PII masking only, no other gates |
+
+```bash
+# Filter a batch
+curl -X POST http://localhost:8000/filter \
+  -H "Content-Type: application/json" \
+  -d '{"texts": ["Valid content here.", "x", "Contact sales@acme.com."]}'
+
+# Single chunk
+curl -X POST http://localhost:8000/filter/single \
+  -d '{"text": "Clean text."}'
+```
+
+Programmatic use:
+```python
+from taparash.server import create_app
+from taparash import QualityConfig
+import uvicorn
+
+app = create_app(QualityConfig(enable_pii_masking=True, enable_dlq=False))
+uvicorn.run(app, host="0.0.0.0", port=8000)
+```
+
+Interactive API docs available at `http://localhost:8000/docs` (Swagger UI).
+
+---
+
+## Prometheus Metrics
+
+```bash
+pip install taparash[metrics]
+```
+
+When `prometheus-client` is installed, `GET /metrics` is automatically available on the REST server in standard Prometheus text format:
+
+```bash
+taparash serve --config pipeline.toml
+curl http://localhost:8000/metrics
+```
+
+Exported metrics:
+
+| Metric | Type | Description |
+|--------|------|-------------|
+| `taparash_chunks_processed_total` | Counter | Total chunks seen |
+| `taparash_chunks_accepted_total` | Counter | Chunks that passed all gates |
+| `taparash_chunks_rejected_total{reason}` | Counter | Rejected chunks, labelled by reason (`length`, `entropy`, `exact_duplicate`, …) |
+| `taparash_acceptance_rate` | Gauge | Fraction accepted (0.0–1.0) |
+| `taparash_pipeline_info` | Info | Static labels: `version`, `python` |
+
+Standalone use in any ASGI/WSGI app:
+
+```python
+from prometheus_client import CollectorRegistry, generate_latest, CONTENT_TYPE_LATEST
+from taparash.metrics_exporter import TaparashCollector
+
+registry = CollectorRegistry()
+TaparashCollector(pipeline, registry=registry)
+
+# In your /metrics route:
+return Response(generate_latest(registry), media_type=CONTENT_TYPE_LATEST)
+```
+
+---
+
+## LlamaIndex Integration
+
+```bash
+pip install taparash[llamaindex]
+```
+
+```python
+from taparash.integrations.llamaindex import TaparashNodePostprocessor
+from taparash import QualityConfig
+
+postprocessor = TaparashNodePostprocessor(
+    config=QualityConfig(enable_pii_masking=True, enable_dlq=False),
+    add_filter_metadata=True,   # injects taparash_accepted / taparash_pii_masked into metadata
+)
+
+# Attach to a RetrieverQueryEngine
+query_engine = index.as_query_engine(
+    node_postprocessors=[postprocessor]
+)
+
+# Or call directly
+filtered_nodes = postprocessor.postprocess_nodes(raw_nodes)
+```
+
+Node scores and metadata are preserved. Original nodes are never mutated — the postprocessor copies each node before applying PII masking. Deduplication state accumulates across calls; create a new instance to reset between independent document sets.
 
 ---
 
@@ -260,7 +515,10 @@ pytest tests/
 | v0.2 | ✅ | Semantic dedup, DLQ, parallel processing |
 | v0.3 | ✅ | NLI contradiction detection, profiling, document connectors |
 | v0.4 | ✅ | Observability, extensible PII, distributed (Ray) backend |
-| v0.5 | 🔜 | Multi-language PII, CLI tool, REST API wrapper |
+| v0.5 | ✅ | Multi-language PII (IBAN/VAT/EU phone), CLI tool, LangChain adapter |
+| v0.6 | ✅ | LlamaIndex adapter, async API (`aprocess_batch`), REST API, YAML/TOML config, CLI |
+| v0.7 | ✅ | Prometheus metrics (`/metrics` endpoint + `TaparashCollector`) |
+| v0.8 | 🔜 | Streaming mode, custom gate plugins |
 
 ---
 

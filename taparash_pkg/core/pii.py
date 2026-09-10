@@ -99,6 +99,58 @@ class PIIMasker:
         r'\b[0-9]{4}[\s-]?[0-9]{4}[\s-]?[0-9]{4}[\s-]?[0-9]{4}\b'
     )
 
+    # IBAN — compact (GB29NWBK60161331926819) and space-formatted (GB29 NWBK 6016 ...)
+    IBAN_COMPACT_PATTERN = re.compile(
+        r'\b[A-Z]{2}\d{2}[A-Z0-9]{11,30}\b'
+    )
+    IBAN_FORMATTED_PATTERN = re.compile(
+        r'\b[A-Z]{2}\d{2}(?:\s[A-Z0-9]{4}){2,7}(?:\s[A-Z0-9]{1,4})?\b'
+    )
+
+    # EU VAT registration numbers (all 27 EU member states + UK/NO)
+    EU_VAT_PATTERN = re.compile(
+        r'\b(?:'
+        r'ATU\d{8}|'                            # Austria
+        r'BE0?\d{9}|'                            # Belgium
+        r'BG\d{9,10}|'                           # Bulgaria
+        r'CY\d{8}[A-Z]|'                         # Cyprus
+        r'CZ\d{8,10}|'                           # Czech Republic
+        r'DE\d{9}|'                              # Germany
+        r'DK\d{8}|'                              # Denmark
+        r'EE\d{9}|'                              # Estonia
+        r'EL\d{9}|'                              # Greece
+        r'ES[A-Z0-9]\d{7}[A-Z0-9]|'             # Spain
+        r'FI\d{8}|'                              # Finland
+        r'FR[A-HJ-NP-Z0-9]{2}\d{9}|'            # France (letters I/O excluded)
+        r'GB(?:\d{9}|\d{12}|GD\d{3}|HA\d{3})|'  # United Kingdom
+        r'HR\d{11}|'                             # Croatia
+        r'HU\d{8}|'                              # Hungary
+        r'IE\d{7}[A-W](?:[A-I])?|'              # Ireland
+        r'IT\d{11}|'                             # Italy
+        r'LT(?:\d{9}|\d{12})|'                  # Lithuania
+        r'LU\d{8}|'                              # Luxembourg
+        r'LV\d{11}|'                             # Latvia
+        r'MT\d{8}|'                              # Malta
+        r'NL\d{9}B\d{2}|'                        # Netherlands
+        r'PL\d{10}|'                             # Poland
+        r'PT\d{9}|'                              # Portugal
+        r'RO\d{2,10}|'                           # Romania
+        r'SE\d{12}|'                             # Sweden
+        r'SI\d{8}|'                              # Slovenia
+        r'SK\d{10}'                              # Slovakia
+        r')\b'
+    )
+
+    # European local phone formats (without +CC prefix, which the existing pattern covers)
+    EU_LOCAL_PHONE_PATTERN = re.compile(
+        r'\b(?:'
+        r'07\d{3}[\s-]?\d{6}|'         # UK mobile (07xxx xxxxxx)
+        r'0[12]\d{3}[\s-]?\d{6}|'      # UK landline (01xxx/02xxx xxxxxx)
+        r'0[1-9](?:[\s.-]\d{2}){4}|'   # France (0X XX XX XX XX)
+        r'0\d{2,4}[\s/-]\d{4,9}'       # Germany (0XX/XXXXXXXX)
+        r')\b'
+    )
+
     def __init__(
         self,
         mask_emails: bool = True,
@@ -106,6 +158,9 @@ class PIIMasker:
         mask_credit_cards: bool = True,
         mask_ssn: bool = True,
         mask_ip_addresses: bool = False,
+        mask_iban: bool = False,
+        mask_eu_vat: bool = False,
+        mask_eu_phone: bool = False,
         replacement_token: str = "[REDACTED]"  # nosec B107 - masking token, not a password
     ):
         """
@@ -124,6 +179,9 @@ class PIIMasker:
         self.mask_credit_cards = mask_credit_cards
         self.mask_ssn = mask_ssn
         self.mask_ip_addresses = mask_ip_addresses
+        self.mask_iban = mask_iban
+        self.mask_eu_vat = mask_eu_vat
+        self.mask_eu_phone = mask_eu_phone
         self.replacement_token = replacement_token
         self._custom_detectors: List[PIIDetector] = []
 
@@ -218,6 +276,39 @@ class PIIMasker:
                         matched_text=match.group()
                     ))
 
+        if self.mask_iban:
+            seen_iban_starts: set = set()
+            for pattern in (self.IBAN_FORMATTED_PATTERN, self.IBAN_COMPACT_PATTERN):
+                for match in pattern.finditer(text):
+                    if match.start() in seen_iban_starts:
+                        continue
+                    if self._validate_iban(match.group()):
+                        seen_iban_starts.add(match.start())
+                        matches.append(PIIMatch(
+                            pii_type="iban",
+                            start=match.start(),
+                            end=match.end(),
+                            matched_text=match.group()
+                        ))
+
+        if self.mask_eu_vat:
+            for match in self.EU_VAT_PATTERN.finditer(text):
+                matches.append(PIIMatch(
+                    pii_type="eu_vat",
+                    start=match.start(),
+                    end=match.end(),
+                    matched_text=match.group()
+                ))
+
+        if self.mask_eu_phone:
+            for match in self.EU_LOCAL_PHONE_PATTERN.finditer(text):
+                matches.append(PIIMatch(
+                    pii_type="eu_phone",
+                    start=match.start(),
+                    end=match.end(),
+                    matched_text=match.group()
+                ))
+
         # Custom detectors (registered via register_detector)
         for detector in self._custom_detectors:
             try:
@@ -310,6 +401,23 @@ class PIIMasker:
             checksum += digit
 
         return checksum % 10 == 0
+
+    @staticmethod
+    def _validate_iban(iban: str) -> bool:
+        """Validate IBAN using ISO 13616 mod-97 checksum."""
+        iban = re.sub(r'\s', '', iban).upper()
+        if len(iban) < 15 or len(iban) > 34:
+            return False
+        # Move first 4 chars to end, then convert letters to digits (A=10…Z=35)
+        rearranged = iban[4:] + iban[:4]
+        numeric = ''.join(
+            str(ord(c) - ord('A') + 10) if c.isalpha() else c
+            for c in rearranged
+        )
+        try:
+            return int(numeric) % 97 == 1
+        except ValueError:
+            return False
 
     @staticmethod
     def _validate_ip(ip_address: str) -> bool:

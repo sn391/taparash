@@ -63,6 +63,10 @@ class QualityConfig:
     pii_mask_credit_cards: bool = True
     pii_mask_ssn: bool = True
     pii_replacement_token: str = "[REDACTED]"
+    # European PII patterns (opt-in; disabled by default to avoid false positives)
+    pii_mask_iban: bool = False
+    pii_mask_eu_vat: bool = False
+    pii_mask_eu_phone: bool = False
 
     # Dead Letter Queue
     enable_dlq: bool = True

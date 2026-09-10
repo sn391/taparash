@@ -67,6 +67,22 @@ connectors-full = [
 distributed = [
     "ray>=2.0.0",
 ]
+langchain = [
+    "langchain-core>=0.1.0",
+]
+llamaindex = [
+    "llama-index-core>=0.10.0",
+]
+yaml = [
+    "pyyaml>=5.0",
+]
+api = [
+    "fastapi>=0.100.0",
+    "uvicorn>=0.20.0",
+]
+metrics = [
+    "prometheus-client>=0.16.0",
+]
 dev = [
     "pytest>=7.0.0",
     "black>=22.0.0",
@@ -83,7 +99,12 @@ all = [
     "python-pptx>=0.6.23",
     "python-docx>=1.0.0",
     "ray>=2.0.0",
+    "langchain-core>=0.1.0",
+    "llama-index-core>=0.10.0",
 ]
+
+[project.scripts]
+taparash = "taparash.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/sn391/taparash"
@@ -94,7 +115,7 @@ Changelog = "https://github.com/sn391/taparash/releases"
 
 [tool.setuptools]
 # Explicitly declare package mapping
-packages = ["taparash", "taparash.core", "taparash.engines", "taparash.connectors", "taparash.backends"]
+packages = ["taparash", "taparash.core", "taparash.engines", "taparash.connectors", "taparash.backends", "taparash.integrations"]
 
 [tool.setuptools.package-dir]
 # Map taparash_pkg directory to taparash package name

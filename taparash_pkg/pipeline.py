@@ -1,5 +1,7 @@
 """Main processing pipeline for Taparash filtering."""
 
+import asyncio
+import functools
 import time
 from typing import Dict, List, Optional, Tuple, Union
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -100,6 +102,9 @@ class TaparashFilter:
                 mask_phones=self.config.pii_mask_phones,
                 mask_credit_cards=self.config.pii_mask_credit_cards,
                 mask_ssn=self.config.pii_mask_ssn,
+                mask_iban=self.config.pii_mask_iban,
+                mask_eu_vat=self.config.pii_mask_eu_vat,
+                mask_eu_phone=self.config.pii_mask_eu_phone,
                 replacement_token=self.config.pii_replacement_token
             )
         else:
@@ -427,6 +432,47 @@ class TaparashFilter:
         )
         self._emit_metrics(start, pii_hits)
         return result
+
+    async def aprocess_single(
+        self, text: "Union[str, DocumentChunk]"
+    ) -> FilterResult:
+        """Async variant of ``process_single`` — runs in a thread-pool executor.
+
+        Safe to await from FastAPI handlers, async LangChain/LlamaIndex chains,
+        or any other async context.  The underlying sync processing is unchanged;
+        this wrapper ensures the event loop is never blocked.
+
+        Args:
+            text: Input text string or DocumentChunk.
+
+        Returns:
+            FilterResult with validation status and reason.
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self.process_single, text)
+
+    async def aprocess_batch(
+        self,
+        texts: "List[Union[str, DocumentChunk]]",
+        use_parallel: bool = False,
+    ) -> BatchResult:
+        """Async variant of ``process_batch`` — runs in a thread-pool executor.
+
+        Safe to await from FastAPI handlers, async LangChain/LlamaIndex chains,
+        or any other async context.  The underlying sync processing is unchanged;
+        this wrapper ensures the event loop is never blocked.
+
+        Args:
+            texts: List of strings or DocumentChunks.
+            use_parallel: Enable parallel processing (passed through to
+                          ``process_batch``).
+
+        Returns:
+            BatchResult with accepted and rejected chunks.
+        """
+        loop = asyncio.get_running_loop()
+        fn = functools.partial(self.process_batch, texts, use_parallel=use_parallel)
+        return await loop.run_in_executor(None, fn)
 
     def _process_batch_distributed(self, texts: "List[Union[str, DocumentChunk]]") -> BatchResult:
         """
