@@ -1,5 +1,6 @@
 """Main processing pipeline for Taparash filtering."""
 
+import time
 from typing import Dict, List, Optional, Tuple, Union
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
@@ -11,6 +12,7 @@ try:
     from taparash.core.deduplication import ExactDeduplicator, MinHashDeduplicator
     from taparash.core.pii import PIIMasker
     from taparash.dlq import DeadLetterQueue
+    from taparash.metrics import PipelineMetrics
 except ImportError:
     # Fall back to local imports (for development)
     from config import QualityConfig, FilterResult, BatchResult, DocumentChunk
@@ -18,6 +20,7 @@ except ImportError:
     from core.deduplication import ExactDeduplicator, MinHashDeduplicator
     from core.pii import PIIMasker
     from dlq import DeadLetterQueue
+    from metrics import PipelineMetrics
 
 # Optional: Import semantic deduplication (requires sentence-transformers)
 try:
@@ -53,14 +56,18 @@ class TaparashFilter:
     7. Contradiction detection (optional, requires NLI model)
     """
 
-    def __init__(self, config: Optional[QualityConfig] = None):
+    def __init__(self, config: Optional[QualityConfig] = None, backend=None):
         """
         Initialize Taparash filter with configuration.
 
         Args:
             config: Quality configuration (uses defaults if None)
+            backend: Optional distributed backend (e.g. RayBackend).  When
+                     provided, stateless gates run on remote workers; stateful
+                     gates (dedup) always run locally on the coordinator.
         """
         self.config = config or QualityConfig()
+        self._backend = backend
 
         # Initialize components
         self._init_pii_masker()
@@ -167,6 +174,28 @@ class TaparashFilter:
         else:
             self.dlq = None
 
+    def _emit_metrics(self, start_time: float, pii_hits: int = 0) -> None:
+        """Build a PipelineMetrics snapshot from current stats and invoke the callback."""
+        if self.config.metrics_callback is None:
+            return
+        s = self.stats
+        m = PipelineMetrics(
+            total=s["total_processed"],
+            accepted=s["accepted"],
+            rejected_length=s["rejected_length"],
+            rejected_entropy=s["rejected_entropy"],
+            rejected_exact_dup=s["rejected_exact_duplicate"],
+            rejected_fuzzy_dup=s["rejected_fuzzy_duplicate"],
+            rejected_semantic_dup=s["rejected_semantic_duplicate"],
+            rejected_contradiction=s["rejected_contradiction"],
+            pii_hits=pii_hits,
+            wall_time_ms=(time.perf_counter() - start_time) * 1000.0,
+        )
+        try:
+            self.config.metrics_callback(m)
+        except Exception:
+            pass  # never let a bad callback break the pipeline
+
     @staticmethod
     def _normalize_input(item: "Union[str, DocumentChunk]") -> "Tuple[str, dict]":
         """Return (text, source_metadata) from a str or DocumentChunk."""
@@ -184,6 +213,7 @@ class TaparashFilter:
         Returns:
             FilterResult with validation status and reason
         """
+        start = time.perf_counter()
         raw_text, source_metadata = self._normalize_input(text)
         original_text = raw_text
 
@@ -195,11 +225,15 @@ class TaparashFilter:
 
         if rejection:
             rejection.source_metadata = source_metadata
+            pii_hits = rejection.metadata.get("pii_masked_count", 0)
+            self._emit_metrics(start, pii_hits)
             return rejection
 
         # Process stateful gates
         result = self._process_stateful_gates(processed_text, original_text, pii_matches)
         result.source_metadata = source_metadata
+        pii_hits = result.metadata.get("pii_masked_count", 0)
+        self._emit_metrics(start, pii_hits)
         return result
 
     def _process_stateless_gates(self, text: str, original_text: str) -> Optional[Tuple[str, List, Optional[FilterResult]]]:
@@ -380,10 +414,85 @@ class TaparashFilter:
         Returns:
             BatchResult with accepted and rejected chunks
         """
-        if use_parallel and self.config.parallel_workers > 1:
-            return self._process_batch_parallel(texts)
+        start = time.perf_counter()
+        if self._backend is not None:
+            result = self._process_batch_distributed(texts)
+        elif use_parallel and self.config.parallel_workers > 1:
+            result = self._process_batch_parallel(texts)
         else:
-            return self._process_batch_sequential(texts)
+            result = self._process_batch_sequential(texts)
+        pii_hits = sum(
+            r.metadata.get("pii_masked_count", 0)
+            for r in result.accepted + result.rejected
+        )
+        self._emit_metrics(start, pii_hits)
+        return result
+
+    def _process_batch_distributed(self, texts: "List[Union[str, DocumentChunk]]") -> BatchResult:
+        """
+        Fan stateless gates across distributed workers; run stateful gates locally.
+
+        Stateless gates (length, PII, entropy) run on remote workers via
+        self._backend.process_stateless().  Stateful gates (deduplication,
+        contradiction) always run on the coordinator to preserve a single
+        shared state.  Note: deduplication is per-coordinator, not cross-
+        worker; each remote shard deduplicates only within itself for the
+        stateless pass.
+        """
+        result = BatchResult()
+
+        with self._stats_lock:
+            self.stats["total_processed"] += len(texts)
+
+        normalised = [self._normalize_input(item) for item in texts]
+
+        # Build a picklable config dict for remote workers (strip callbacks/locks)
+        cfg_kwargs = {
+            f: getattr(self.config, f)
+            for f in self.config.__dataclass_fields__
+            if f != "metrics_callback" and not callable(getattr(self.config, f, None))
+        }
+        # Disable stateful gates and DLQ on remote workers
+        cfg_kwargs.update({
+            "enable_exact_dedup": False,
+            "enable_fuzzy_dedup": False,
+            "enable_semantic_dedup": False,
+            "check_contradictions": False,
+            "enable_dlq": False,
+        })
+
+        def _stateless_fn(raw_text: str, _original: str):
+            try:
+                from taparash.pipeline import TaparashFilter
+                from taparash.config import QualityConfig
+            except ImportError:
+                from pipeline import TaparashFilter  # type: ignore[no-redef]
+                from config import QualityConfig  # type: ignore[no-redef]
+            config = QualityConfig(**cfg_kwargs)
+            worker = TaparashFilter(config)
+            return worker._process_stateless_gates(raw_text, raw_text)
+
+        raw_texts = [t for t, _ in normalised]
+        stateless_results = self._backend.process_stateless(raw_texts, _stateless_fn)
+
+        # Run stateful gates sequentially on the coordinator
+        for (raw_text, src_meta), gate_result in zip(normalised, stateless_results):
+            processed_text, pii_matches, rejection = gate_result
+            if rejection:
+                rejection.source_metadata = src_meta
+                result.rejected.append(rejection)
+            else:
+                filter_result = self._process_stateful_gates(processed_text, raw_text, pii_matches)
+                filter_result.source_metadata = src_meta
+                if filter_result.is_valid:
+                    result.accepted.append(filter_result)
+                else:
+                    result.rejected.append(filter_result)
+
+        if self.dlq and result.rejected:
+            self.dlq.log_batch(result.rejected)
+
+        return result
 
     def _process_batch_sequential(self, texts: "List[Union[str, DocumentChunk]]") -> BatchResult:
         """Process batch sequentially (original behavior)."""

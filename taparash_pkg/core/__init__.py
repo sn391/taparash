@@ -10,7 +10,7 @@ from .deduplication import (
     deduplicate_exact,
     deduplicate_fuzzy,
 )
-from .pii import PIIMasker, PIIMatch, mask_pii
+from .pii import PIIMasker, PIIMatch, mask_pii, PIIDetector
 
 __all__ = [
     "shannon_entropy",
@@ -25,4 +25,5 @@ __all__ = [
     "PIIMasker",
     "PIIMatch",
     "mask_pii",
+    "PIIDetector",
 ]

@@ -21,6 +21,7 @@ from .core import (
     PIIMasker,
     PIIMatch,
     mask_pii,
+    PIIDetector,
 )
 
 # Main components - relative imports
@@ -28,6 +29,7 @@ from .config import QualityConfig, FilterResult, BatchResult, DocumentChunk
 from .pipeline import TaparashFilter
 from .dlq import DeadLetterQueue
 from .profiler import TaparashProfiler, benchmark_pipeline, compare_configurations, profile_comparison
+from .metrics import PipelineMetrics, MetricsCallback
 
 # Optional connectors (require taparash[connectors])
 __all_optional__ = []
@@ -52,6 +54,13 @@ try:
 except ImportError:
     pass
 
+# Optional distributed backends (require taparash[distributed])
+try:
+    from .backends import DistributedBackend, RayBackend
+    __all_optional__.extend(["DistributedBackend", "RayBackend"])
+except ImportError:
+    pass
+
 __all__ = [
     # Version
     "__version__",
@@ -70,6 +79,7 @@ __all__ = [
     "PIIMasker",
     "PIIMatch",
     "mask_pii",
+    "PIIDetector",
     # Config & Results
     "QualityConfig",
     "FilterResult",
@@ -83,4 +93,7 @@ __all__ = [
     "benchmark_pipeline",
     "compare_configurations",
     "profile_comparison",
+    # Observability
+    "PipelineMetrics",
+    "MetricsCallback",
 ] + __all_optional__

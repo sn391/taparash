@@ -1,7 +1,7 @@
 """Configuration management for Taparash."""
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional, List
+from typing import Any, Callable, Dict, Optional, List
 
 
 @dataclass
@@ -75,6 +75,12 @@ class QualityConfig:
     # Model paths (for offline models)
     embeddings_model_path: Optional[str] = None
     nli_model_path: Optional[str] = None
+
+    # Distributed processing
+    distributed_backend: Optional[str] = None  # "ray" → use RayBackend (requires taparash[distributed])
+
+    # Observability
+    metrics_callback: Optional[Callable] = None  # called with PipelineMetrics after each process call
 
     def validate(self) -> List[str]:
         """

@@ -1,7 +1,7 @@
 """PII detection and masking using regex patterns."""
 
 import re
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Protocol, runtime_checkable
 from dataclasses import dataclass
 
 
@@ -13,6 +13,39 @@ class PIIMatch:
     start: int
     end: int
     matched_text: str
+
+
+@runtime_checkable
+class PIIDetector(Protocol):
+    """
+    Protocol for custom PII detectors that extend PIIMasker.
+
+    Implement ``detect(text)`` returning a list of PIIMatch objects, then
+    register with ``PIIMasker.register_detector(your_detector)``.  Custom
+    detectors run after all built-in regex patterns and their results are
+    merged and sorted by start offset.
+
+    Example::
+
+        class SpacyNERDetector:
+            def __init__(self, nlp):
+                self.nlp = nlp
+
+            def detect(self, text: str) -> List[PIIMatch]:
+                doc = self.nlp(text)
+                return [
+                    PIIMatch(ent.label_.lower(), ent.start_char, ent.end_char, ent.text)
+                    for ent in doc.ents
+                    if ent.label_ in {"PERSON", "ORG", "GPE"}
+                ]
+
+        masker = PIIMasker()
+        masker.register_detector(SpacyNERDetector(spacy.load("en_core_web_sm")))
+    """
+
+    def detect(self, text: str) -> List[PIIMatch]:
+        """Detect PII in text; return list of PIIMatch, sorted by start offset."""
+        ...
 
 
 class PIIMasker:
@@ -92,6 +125,29 @@ class PIIMasker:
         self.mask_ssn = mask_ssn
         self.mask_ip_addresses = mask_ip_addresses
         self.replacement_token = replacement_token
+        self._custom_detectors: List[PIIDetector] = []
+
+    def register_detector(self, detector: PIIDetector) -> None:
+        """
+        Register a custom PII detector alongside built-in regex patterns.
+
+        Args:
+            detector: Any object implementing the PIIDetector protocol
+                      (has a ``detect(text) -> List[PIIMatch]`` method).
+        """
+        self._custom_detectors.append(detector)
+
+    def unregister_detector(self, detector: PIIDetector) -> None:
+        """
+        Remove a previously registered custom detector.
+
+        Args:
+            detector: The detector instance to remove.
+
+        Raises:
+            ValueError: If the detector is not registered.
+        """
+        self._custom_detectors.remove(detector)
 
     def detect_pii(self, text: str) -> List[PIIMatch]:
         """
@@ -161,6 +217,13 @@ class PIIMasker:
                         end=match.end(),
                         matched_text=match.group()
                     ))
+
+        # Custom detectors (registered via register_detector)
+        for detector in self._custom_detectors:
+            try:
+                matches.extend(detector.detect(text))
+            except Exception:
+                pass  # never let a custom detector crash the pipeline
 
         return sorted(matches, key=lambda x: x.start)
 
