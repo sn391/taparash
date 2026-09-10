@@ -24,13 +24,21 @@ from .core import (
 )
 
 # Main components - relative imports
-from .config import QualityConfig, FilterResult, BatchResult
+from .config import QualityConfig, FilterResult, BatchResult, DocumentChunk
 from .pipeline import TaparashFilter
 from .dlq import DeadLetterQueue
 from .profiler import TaparashProfiler, benchmark_pipeline, compare_configurations
 
-# Optional Phase 2 & 3 components (require sentence-transformers)
+# Optional connectors (require taparash[connectors])
 __all_optional__ = []
+
+try:
+    from .connectors import load_html, load_pdf
+    __all_optional__.extend(["load_html", "load_pdf"])
+except ImportError:
+    pass
+
+# Optional Phase 2 & 3 components (require sentence-transformers)
 
 try:
     from .engines import LocalEmbedder, SemanticDeduplicator
@@ -66,6 +74,7 @@ __all__ = [
     "QualityConfig",
     "FilterResult",
     "BatchResult",
+    "DocumentChunk",
     # Main Pipeline
     "TaparashFilter",
     # Phase 2: DLQ & Profiling

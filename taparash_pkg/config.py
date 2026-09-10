@@ -1,7 +1,27 @@
 """Configuration management for Taparash."""
 
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
+
+
+@dataclass
+class DocumentChunk:
+    """
+    A text chunk with structural metadata from a source document.
+
+    Used by connectors (PDF, HTML, DOCX, PPTX) to carry provenance
+    through the pipeline so rejection audit records include source context.
+    """
+
+    text: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    # Common metadata keys populated by connectors:
+    #   source_file: str      - original file path or URL
+    #   format: str           - "pdf" | "html" | "pptx" | "docx"
+    #   page_num: int         - 1-indexed page number (PDF, DOCX)
+    #   slide_num: int        - 1-indexed slide number (PPTX)
+    #   heading: str          - nearest section heading
+    #   is_table: bool        - True when chunk came from a table cell
 
 
 @dataclass
@@ -120,6 +140,7 @@ class FilterResult:
     reason_code: Optional[str] = None
     reason_detail: Optional[str] = None
     metadata: dict = field(default_factory=dict)
+    source_metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         """Ensure metadata is a dict."""

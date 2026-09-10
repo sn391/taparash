@@ -1,7 +1,15 @@
 """Configuration management for Taparash."""
 
 from dataclasses import dataclass, field
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
+
+
+@dataclass
+class DocumentChunk:
+    """A text chunk with structural metadata from a source document."""
+
+    text: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -120,6 +128,7 @@ class FilterResult:
     reason_code: Optional[str] = None
     reason_detail: Optional[str] = None
     metadata: dict = field(default_factory=dict)
+    source_metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self):
         """Ensure metadata is a dict."""

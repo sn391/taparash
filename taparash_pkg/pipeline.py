@@ -1,19 +1,19 @@
 """Main processing pipeline for Taparash filtering."""
 
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
 try:
     # Try package import first (when installed via pip)
-    from taparash.config import QualityConfig, FilterResult, BatchResult
+    from taparash.config import QualityConfig, FilterResult, BatchResult, DocumentChunk
     from taparash.core.entropy import shannon_entropy, is_gibberish
     from taparash.core.deduplication import ExactDeduplicator, MinHashDeduplicator
     from taparash.core.pii import PIIMasker
     from taparash.dlq import DeadLetterQueue
 except ImportError:
     # Fall back to local imports (for development)
-    from config import QualityConfig, FilterResult, BatchResult
+    from config import QualityConfig, FilterResult, BatchResult, DocumentChunk
     from core.entropy import shannon_entropy, is_gibberish
     from core.deduplication import ExactDeduplicator, MinHashDeduplicator
     from core.pii import PIIMasker
@@ -167,29 +167,40 @@ class TaparashFilter:
         else:
             self.dlq = None
 
-    def process_single(self, text: str) -> FilterResult:
+    @staticmethod
+    def _normalize_input(item: "Union[str, DocumentChunk]") -> "Tuple[str, dict]":
+        """Return (text, source_metadata) from a str or DocumentChunk."""
+        if isinstance(item, str):
+            return item, {}
+        return item.text, item.metadata
+
+    def process_single(self, text: "Union[str, DocumentChunk]") -> FilterResult:
         """
         Process a single text chunk through the filtering pipeline.
 
         Args:
-            text: Input text string
+            text: Input text string or DocumentChunk (from a connector)
 
         Returns:
             FilterResult with validation status and reason
         """
-        original_text = text
+        raw_text, source_metadata = self._normalize_input(text)
+        original_text = raw_text
 
         with self._stats_lock:
             self.stats["total_processed"] += 1
 
         # Process stateless gates
-        processed_text, pii_matches, rejection = self._process_stateless_gates(text, original_text)
+        processed_text, pii_matches, rejection = self._process_stateless_gates(raw_text, original_text)
 
         if rejection:
+            rejection.source_metadata = source_metadata
             return rejection
 
         # Process stateful gates
-        return self._process_stateful_gates(processed_text, original_text, pii_matches)
+        result = self._process_stateful_gates(processed_text, original_text, pii_matches)
+        result.source_metadata = source_metadata
+        return result
 
     def _process_stateless_gates(self, text: str, original_text: str) -> Optional[Tuple[str, List, Optional[FilterResult]]]:
         """
@@ -354,12 +365,16 @@ class TaparashFilter:
             }
         )
 
-    def process_batch(self, texts: List[str], use_parallel: bool = False) -> BatchResult:
+    def process_batch(
+        self,
+        texts: "List[Union[str, DocumentChunk]]",
+        use_parallel: bool = False,
+    ) -> BatchResult:
         """
         Process a batch of text chunks with optimized batching.
 
         Args:
-            texts: List of input text strings
+            texts: List of strings or DocumentChunks (from a connector)
             use_parallel: Enable parallel processing (default: False for compatibility)
 
         Returns:
@@ -370,24 +385,26 @@ class TaparashFilter:
         else:
             return self._process_batch_sequential(texts)
 
-    def _process_batch_sequential(self, texts: List[str]) -> BatchResult:
+    def _process_batch_sequential(self, texts: "List[Union[str, DocumentChunk]]") -> BatchResult:
         """Process batch sequentially (original behavior)."""
         result = BatchResult()
 
         with self._stats_lock:
             self.stats["total_processed"] += len(texts)
 
-        for text in texts:
-            original_text = text
+        for item in texts:
+            raw_text, source_metadata = self._normalize_input(item)
+            original_text = raw_text
 
             # Process stateless gates
-            processed_text, pii_matches, rejection = self._process_stateless_gates(text, original_text)
+            processed_text, pii_matches, rejection = self._process_stateless_gates(raw_text, original_text)
 
             if rejection:
+                rejection.source_metadata = source_metadata
                 result.rejected.append(rejection)
             else:
-                # Process stateful gates
                 filter_result = self._process_stateful_gates(processed_text, original_text, pii_matches)
+                filter_result.source_metadata = source_metadata
                 if filter_result.is_valid:
                     result.accepted.append(filter_result)
                 else:
@@ -399,7 +416,7 @@ class TaparashFilter:
 
         return result
 
-    def _process_batch_parallel(self, texts: List[str]) -> BatchResult:
+    def _process_batch_parallel(self, texts: "List[Union[str, DocumentChunk]]") -> BatchResult:
         """
         Process batch with parallel workers for stateless gates.
 
@@ -411,45 +428,50 @@ class TaparashFilter:
         with self._stats_lock:
             self.stats["total_processed"] += len(texts)
 
-        # Split into batches based on batch_size
+        # Normalise once; keep source_metadata alongside raw text
+        normalised = [self._normalize_input(item) for item in texts]
+
         batch_size = self.config.batch_size
-        num_batches = (len(texts) + batch_size - 1) // batch_size
+        num_batches = (len(normalised) + batch_size - 1) // batch_size
 
         for batch_idx in range(num_batches):
             start_idx = batch_idx * batch_size
-            end_idx = min(start_idx + batch_size, len(texts))
-            batch_texts = texts[start_idx:end_idx]
+            end_idx = min(start_idx + batch_size, len(normalised))
+            batch = normalised[start_idx:end_idx]
 
             # Process stateless gates in parallel
-            stateless_results = {}
+            stateless_results: Dict[int, tuple] = {}
             with ThreadPoolExecutor(max_workers=self.config.parallel_workers) as executor:
                 futures = {
-                    executor.submit(self._process_stateless_gates, text, text): (idx, text)
-                    for idx, text in enumerate(batch_texts)
+                    executor.submit(self._process_stateless_gates, raw_text, raw_text): (idx, raw_text, src_meta)
+                    for idx, (raw_text, src_meta) in enumerate(batch)
                 }
 
                 for future in as_completed(futures):
-                    idx, original_text = futures[future]
+                    idx, original_text, src_meta = futures[future]
                     try:
-                        stateless_results[idx] = future.result()
+                        stateless_results[idx] = (*future.result(), src_meta)
                     except Exception as e:
-                        # Handle any processing errors
                         stateless_results[idx] = (None, [], FilterResult(
                             text=original_text,
                             original_text=original_text,
                             is_valid=False,
                             reason_code="PROCESSING_ERROR",
                             reason_detail=f"Error during processing: {str(e)}",
-                            metadata={}
-                        ))
+                            metadata={},
+                            source_metadata=src_meta,
+                        ), src_meta)
 
             # Process stateful gates sequentially in original order
             for idx in sorted(stateless_results.keys()):
-                processed_text, pii_matches, rejection = stateless_results[idx]
+                processed_text, pii_matches, rejection, src_meta = stateless_results[idx]
                 if rejection:
+                    rejection.source_metadata = src_meta
                     result.rejected.append(rejection)
                 else:
-                    filter_result = self._process_stateful_gates(processed_text, batch_texts[idx], pii_matches)
+                    original_text = batch[idx][0]
+                    filter_result = self._process_stateful_gates(processed_text, original_text, pii_matches)
+                    filter_result.source_metadata = src_meta
                     if filter_result.is_valid:
                         result.accepted.append(filter_result)
                     else:
