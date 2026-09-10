@@ -73,7 +73,7 @@ class PIIMasker:
         mask_credit_cards: bool = True,
         mask_ssn: bool = True,
         mask_ip_addresses: bool = False,
-        replacement_token: str = "[REDACTED]"
+        replacement_token: str = "[REDACTED]"  # nosec B107 - masking token, not a password
     ):
         """
         Initialize PII masker.
@@ -275,7 +275,7 @@ def mask_pii(
     mask_phones: bool = True,
     mask_credit_cards: bool = True,
     mask_ssn: bool = True,
-    replacement_token: str = "[REDACTED]"
+    replacement_token: str = "[REDACTED]"  # nosec B107 - masking token, not a password
 ) -> Tuple[str, List[PIIMatch]]:
     """
     Convenience function to mask PII in text.

@@ -136,7 +136,7 @@ class MinHashDeduplicator:
 
         # Generate deterministic hash coefficients for permutations
         import random
-        rng = random.Random(seed)
+        rng = random.Random(seed)  # nosec B311 - seeded RNG for deterministic MinHash, not crypto
         self.hash_params = [
             (rng.randint(1, 2**32 - 1), rng.randint(1, 2**32 - 1))
             for _ in range(num_perm)
