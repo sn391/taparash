@@ -1,76 +1,29 @@
 """
-Taparash - Zero-LLM Data Quality & Compliance Gateway for RAG Systems.
+Compatibility shim loaded when the repo root is imported as the 'taparash'
+package.  This happens because the repository is named 'taparash' and Python
+treats it as a package when any ancestor directory is in sys.path.
 
-100% offline, air-gapped data quality filtering with PII masking,
-deduplication, semantic analysis, and contradiction detection.
+The real source is in taparash_pkg/.  This shim loads that directory
+transparently so that 'import taparash' and 'from taparash import X'
+always resolve correctly regardless of which __init__.py Python finds first.
 """
+import sys
+import importlib.util
+from pathlib import Path
 
-__version__ = "0.3.0"
+_repo_root = Path(__file__).parent
+_pkg_dir = str(_repo_root / "taparash_pkg")
+_pkg_init = str(_repo_root / "taparash_pkg" / "__init__.py")
 
-# Core imports - direct from modules
-from core import (
-    shannon_entropy,
-    is_gibberish,
-    sha256_hash,
-    ExactDeduplicator,
-    MinHashDeduplicator,
-    create_shingles,
-    create_word_shingles,
-    deduplicate_exact,
-    deduplicate_fuzzy,
-    PIIMasker,
-    PIIMatch,
-    mask_pii,
+spec = importlib.util.spec_from_file_location(
+    "taparash",
+    _pkg_init,
+    submodule_search_locations=[_pkg_dir],
 )
 
-# Main components - direct imports
-from config import QualityConfig, FilterResult, BatchResult
-from pipeline import TaparashFilter
-from dlq import DeadLetterQueue
-from profiler import TaparashProfiler, benchmark_pipeline, compare_configurations
-
-# Optional Phase 2 & 3 components (require sentence-transformers)
-__all_optional__ = []
-
-try:
-    from engines import LocalEmbedder, SemanticDeduplicator
-    __all_optional__.extend(["LocalEmbedder", "SemanticDeduplicator"])
-except ImportError:
-    pass
-
-try:
-    from engines.nli import LocalNLI, ContradictionDetector, CoherenceValidator
-    __all_optional__.extend(["LocalNLI", "ContradictionDetector", "CoherenceValidator"])
-except ImportError:
-    pass
-
-__all__ = [
-    # Version
-    "__version__",
-    # Core entropy
-    "shannon_entropy",
-    "is_gibberish",
-    # Core deduplication
-    "sha256_hash",
-    "ExactDeduplicator",
-    "MinHashDeduplicator",
-    "create_shingles",
-    "create_word_shingles",
-    "deduplicate_exact",
-    "deduplicate_fuzzy",
-    # Core PII
-    "PIIMasker",
-    "PIIMatch",
-    "mask_pii",
-    # Config & Results
-    "QualityConfig",
-    "FilterResult",
-    "BatchResult",
-    # Main Pipeline
-    "TaparashFilter",
-    # Phase 2: DLQ & Profiling
-    "DeadLetterQueue",
-    "TaparashProfiler",
-    "benchmark_pipeline",
-    "compare_configurations",
-] + __all_optional__
+if spec and spec.loader:
+    _module = importlib.util.module_from_spec(spec)
+    _module.__path__ = [_pkg_dir]   # lets 'from taparash.core import' find taparash_pkg/core/
+    _module.__package__ = "taparash"
+    sys.modules["taparash"] = _module
+    spec.loader.exec_module(_module)
