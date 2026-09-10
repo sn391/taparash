@@ -184,6 +184,41 @@ masker.register_detector(SpacyNERDetector(spacy.load("en_core_web_sm")))
 
 ---
 
+## Benchmarks
+
+Run the harness on your own hardware to get reproducible, hardware-normalised numbers:
+
+```bash
+python benchmarks/run_benchmark.py          # full suite (~3 min)
+python benchmarks/run_benchmark.py --quick  # smoke test (~25 s)
+```
+
+Results are written to `benchmarks/results/benchmark_<date>_<host>.json` and `.md`.
+
+**What is measured:**
+
+| Suite | Description |
+|-------|-------------|
+| Per-gate latency | Median / P95 / P99 µs per chunk for each isolated gate |
+| End-to-end throughput | Chunks/s and **MB/s per CPU core** at batch sizes 100 → 10k |
+| Parallel scaling | Throughput vs. worker count (1 → N cores) |
+| Memory | Peak RSS delta and MB per million tokens |
+
+**Comparison with other tools**
+
+These tools solve adjacent but distinct sub-problems. A fair comparison must:
+1. Run each tool's own benchmark on the **same hardware**.
+2. Report CPU model, core count, RAM, and OS.
+3. State what each tool actually does (scope differs).
+
+| Tool | Scope | How to benchmark |
+|------|-------|-----------------|
+| **taparash** | Post-parse quality filtering (dedup, PII, entropy) | `python benchmarks/run_benchmark.py` |
+| NeMo Curator | Full dataset curation incl. GPU-accelerated dedup | NeMo Curator's own benchmark scripts |
+| Unstructured.io | Document parsing (PDF/HTML → text) | Unstructured's benchmark CLI |
+
+---
+
 ## Development
 
 ```bash

@@ -1,0 +1,5 @@
+# Benchmark result files are machine-specific — do not commit them.
+# Commit only the .gitkeep to preserve the directory.
+*.json
+*.md
+!.gitkeep
