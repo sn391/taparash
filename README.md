@@ -204,6 +204,28 @@ Results are written to `benchmarks/results/benchmark_<date>_<host>.json` and `.m
 | Parallel scaling | Throughput vs. worker count (1 → N cores) |
 | Memory | Peak RSS delta and MB per million tokens |
 
+**Reference numbers — stateless gates only (`--no-fuzzy`)**
+
+> Hardware: Intel Core i7-8550U · 8 logical / 4 physical cores · 16.9 GB RAM · Windows 11 · Python 3.12.9
+
+| Batch size | Chunks/s | MB/s | MB/s per core |
+|-----------|---------|------|---------------|
+| 100 | 8,936 | 2.83 | **0.354** |
+| 500 | 8,860 | 2.84 | **0.355** |
+
+Per-gate latency (median µs/chunk):
+
+| Gate | Median µs | P95 µs |
+|------|-----------|--------|
+| Length validation | 3.4 | 3.4 |
+| Exact dedup (SHA-256) | 5.9 | 6.6 |
+| Entropy check | 62.0 | 63.6 |
+| PII masking | 148.1 | 154.9 |
+| Fuzzy dedup (MinHash-128) | 15,035 | 15,245 |
+| **Full pipeline (no fuzzy)** | **132.9** | **149.3** |
+
+> MinHash is intentionally excluded from the throughput headline — at 128 permutations it dominates (~15 ms/chunk) and is not comparable to tools that skip probabilistic dedup. Run `python benchmarks/run_benchmark.py` (without `--no-fuzzy`) to measure the complete pipeline on your hardware.
+
 **Comparison with other tools**
 
 These tools solve adjacent but distinct sub-problems. A fair comparison must:
@@ -213,7 +235,7 @@ These tools solve adjacent but distinct sub-problems. A fair comparison must:
 
 | Tool | Scope | How to benchmark |
 |------|-------|-----------------|
-| **taparash** | Post-parse quality filtering (dedup, PII, entropy) | `python benchmarks/run_benchmark.py` |
+| **taparash** | Post-parse quality filtering (dedup, PII, entropy) | `python benchmarks/run_benchmark.py --no-fuzzy` |
 | NeMo Curator | Full dataset curation incl. GPU-accelerated dedup | NeMo Curator's own benchmark scripts |
 | Unstructured.io | Document parsing (PDF/HTML → text) | Unstructured's benchmark CLI |
 

@@ -469,6 +469,11 @@ def format_markdown(results: Dict[str, Any]) -> str:
         "",
         "> Numbers below are from a single run on the hardware above.",
         "> Re-run `python benchmarks/run_benchmark.py` to get numbers for your machine.",
+        *(
+            ["> **`--no-fuzzy` mode:** MinHash fuzzy dedup disabled. "
+             "Throughput reflects stateless gates only (length, PII, entropy, exact dedup)."]
+            if results.get("config", {}).get("no_fuzzy") else []
+        ),
         "",
         "### End-to-End Throughput (full pipeline)",
         "",
@@ -579,6 +584,16 @@ def main() -> None:
         default=42,
         help="Random seed for synthetic data generation (default: 42)",
     )
+    parser.add_argument(
+        "--no-fuzzy",
+        action="store_true",
+        help=(
+            "Disable MinHash fuzzy dedup in the full-pipeline config. "
+            "Use this to benchmark stateless gates (PII, entropy, exact dedup) "
+            "in isolation from the expensive MinHash pass — produces numbers "
+            "comparable to tools like NeMo Curator quality filters."
+        ),
+    )
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -601,6 +616,11 @@ def main() -> None:
         WORKER_COUNTS = [1, 2, 4, max(1, multiprocessing.cpu_count() // 2)]
         WORKER_COUNTS = sorted(set(WORKER_COUNTS))
 
+    # Apply --no-fuzzy: patch full_pipeline config in-place before any suite runs
+    if args.no_fuzzy:
+        GATE_CONFIGS["full_pipeline"]["enable_fuzzy_dedup"] = False
+        GATE_CONFIGS["full_pipeline"]["enable_exact_dedup"] = True  # keep exact dedup
+
     hw = get_hardware_info()
     print("=" * 65)
     print("  Taparash Benchmark Harness")
@@ -610,7 +630,7 @@ def main() -> None:
     print(f"  RAM    : {hw.get('ram_gb', 'N/A')} GB")
     print(f"  OS     : {hw['os']}")
     print(f"  Python : {hw['python']}")
-    print(f"  Mode   : {'quick' if args.quick else 'full'}")
+    print(f"  Mode   : {'quick' if args.quick else 'full'}{' + no-fuzzy' if args.no_fuzzy else ''}")
     print("=" * 65)
 
     # Generate data once
@@ -657,6 +677,7 @@ def main() -> None:
             "measure_iters": MEASURE,
             "seed": args.seed,
             "quick_mode": args.quick,
+            "no_fuzzy": args.no_fuzzy,
         },
     }
 
