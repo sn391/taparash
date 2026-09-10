@@ -193,8 +193,8 @@ class TaparashFilter:
         )
         try:
             self.config.metrics_callback(m)
-        except Exception:
-            pass  # never let a bad callback break the pipeline
+        except Exception:  # nosec B110 - intentional: bad callback must not crash pipeline
+            pass
 
     @staticmethod
     def _normalize_input(item: "Union[str, DocumentChunk]") -> "Tuple[str, dict]":

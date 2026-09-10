@@ -222,8 +222,8 @@ class PIIMasker:
         for detector in self._custom_detectors:
             try:
                 matches.extend(detector.detect(text))
-            except Exception:
-                pass  # never let a custom detector crash the pipeline
+            except Exception:  # nosec B110 - intentional: bad detector must not crash pipeline
+                pass
 
         return sorted(matches, key=lambda x: x.start)
 
