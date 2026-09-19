@@ -17,6 +17,8 @@ class PipelineMetrics:
     accepted: int = 0
     rejected_length: int = 0
     rejected_entropy: int = 0
+    rejected_heuristic_quality: int = 0
+    rejected_language: int = 0
     rejected_exact_dup: int = 0
     rejected_fuzzy_dup: int = 0
     rejected_semantic_dup: int = 0
@@ -44,6 +46,8 @@ class PipelineMetrics:
             "rejected": self.rejected,
             "rejected_length": self.rejected_length,
             "rejected_entropy": self.rejected_entropy,
+            "rejected_heuristic_quality": self.rejected_heuristic_quality,
+            "rejected_language": self.rejected_language,
             "rejected_exact_dup": self.rejected_exact_dup,
             "rejected_fuzzy_dup": self.rejected_fuzzy_dup,
             "rejected_semantic_dup": self.rejected_semantic_dup,

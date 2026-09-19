@@ -22,6 +22,9 @@ from .core import (
     PIIMatch,
     mask_pii,
     PIIDetector,
+    HeuristicQualityFilter,
+    QualityCheckResult,
+    LanguageFilter,
 )
 
 # Main components - relative imports
@@ -102,6 +105,10 @@ __all__ = [
     "PIIMatch",
     "mask_pii",
     "PIIDetector",
+    # Heuristic quality & language
+    "HeuristicQualityFilter",
+    "QualityCheckResult",
+    "LanguageFilter",
     # Config & Results
     "QualityConfig",
     "FilterResult",

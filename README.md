@@ -18,6 +18,8 @@
 pip install taparash                   # core only
 pip install taparash[semantic]         # + semantic dedup & contradiction detection
 pip install taparash[connectors]       # + PDF / HTML document loaders
+pip install taparash[langid]           # + language identification (fastText)
+pip install taparash[anonymizer]       # + Faker for realistic PII replacement
 pip install taparash[distributed]      # + Ray-based distributed processing
 pip install taparash[langchain]        # + LangChain BaseDocumentTransformer
 pip install taparash[llamaindex]       # + LlamaIndex BaseNodePostprocessor
@@ -64,21 +66,29 @@ Each chunk passes through gates in order. The first failure stops processing.
 | 1 | Length (min / max) | `LENGTH_TOO_SHORT` / `LENGTH_TOO_LONG` |
 | 2 | PII masking | — (text is masked, not rejected) |
 | 3 | Shannon entropy (gibberish) | `HIGH_ENTROPY` |
-| 4 | Exact dedup (SHA-256) | `EXACT_DUPLICATE` |
-| 5 | Fuzzy dedup (MinHash LSH) | `FUZZY_DUPLICATE` |
-| 6 | Semantic dedup (MiniLM) | `SEMANTIC_DUPLICATE` |
-| 7 | Contradiction detection (NLI) | `CONTRADICTION` |
+| 4 | Heuristic quality (Gopher/C4 rules) | `HIGH_LINE_LENGTH_RATIO` / `HIGH_SYMBOL_DENSITY` / `HIGH_WORD_REPETITION` |
+| 5 | Language identification | `LANGUAGE_NOT_ALLOWED` |
+| 6 | Exact dedup (SHA-256) | `EXACT_DUPLICATE` |
+| 7 | Fuzzy dedup (MinHash LSH) | `FUZZY_DUPLICATE` |
+| 8 | Semantic dedup (MiniLM) | `SEMANTIC_DUPLICATE` |
+| 9 | Contradiction detection (NLI) | `CONTRADICTION` |
 
-Gates 6 and 7 require `pip install taparash[semantic]`.
+**Gates 4–5 (Heuristic quality & Language ID):** Optional, disabled by default. No extra dependencies for heuristic quality; language identification requires `pip install taparash[langid]`.
+
+**Gates 8–9 (Semantic):** Require `pip install taparash[semantic]`.
 
 ---
 
 ## Key Features
 
 ### Core (always available)
-- **PII Masking** — regex-based; emails, phones, credit cards (Luhn-validated), SSNs, IPs
+- **PII Masking** — regex-based; emails, phones, credit cards (Luhn-validated), SSNs, IPs, dates, times
+- **PII Anonymization Strategies** — `"redact"` (default), `"hash"` (SHA-256 prefix), `"replace"` (realistic Faker data), or `"tag"` (label type). Per-entity overrides: `strategies={"email": "hash", "phone": "replace"}`
+- **European PII** (opt-in) — IBAN (ISO 13616), EU VAT (27 member states + UK), local phone formats (UK/FR/DE)
 - **Extensible PII** — plug in any custom detector via `PIIDetector` protocol
 - **Exact + Fuzzy Dedup** — SHA-256 hash and MinHash LSH
+- **Heuristic Quality Filter** — Gopher/C4 rules: line-length ratio, symbol density, word repetition
+- **Language Identification** — offline fastText via `langdetect` (optional)
 - **Entropy Filter** — rejects gibberish, binary payloads, corrupted OCR
 - **Dead Letter Queue** — SQLite audit log of every rejected chunk with provenance
 
@@ -167,11 +177,25 @@ QualityConfig(
     pii_mask_phones=True,
     pii_mask_credit_cards=True,
     pii_mask_ssn=True,
+    pii_mask_dates=False,                          # ISO dates, DD/MM/YYYY, times
     pii_replacement_token="[REDACTED]",
+    pii_anonymization_strategy="redact",           # "redact" | "hash" | "replace" | "tag"
+    pii_strategies={},                             # per-entity overrides, e.g. {"email": "hash"}
     # European PII (opt-in)
     pii_mask_iban=False,        # IBAN with ISO 13616 mod-97 checksum validation
     pii_mask_eu_vat=False,      # EU VAT numbers for all 27 member states + UK
     pii_mask_eu_phone=False,    # UK/FR/DE local phone formats (no +CC prefix)
+
+    # Heuristic quality (Gopher/C4 rules; opt-in)
+    enable_heuristic_quality=False,
+    heuristic_max_line_length=1000,
+    heuristic_max_line_length_ratio=0.3,           # max % of lines exceeding max_line_length
+    heuristic_max_symbol_density=0.1,              # max % of non-alphanumeric characters
+    heuristic_max_word_repetition_ratio=0.5,       # max % of duplicate word tokens
+
+    # Language identification (requires taparash[langid]; opt-in)
+    enable_language_filter=False,
+    allowed_languages=["en"],                      # ISO 639-1 codes
 
     # Semantic (requires taparash[semantic])
     enable_semantic_dedup=False,
@@ -192,6 +216,85 @@ QualityConfig(
     metrics_callback=None,         # Callable[[PipelineMetrics], None]
 )
 ```
+
+---
+
+## PII Anonymization Strategies
+
+Four strategies are available for replacing detected PII:
+
+| Strategy | Example Output | Deterministic | Notes |
+|----------|---|---|---|
+| `"redact"` | `[REDACTED]` | ✓ | Default; simple masking. |
+| `"hash"` | `[SHA:3a7f9c2e]` | ✓ | SHA-256 prefix (8 hex chars). Good for audit trails / pseudonymization. |
+| `"replace"` | `user123@mail.com` | ✗ | Realistic fake data via Faker. Requires `pip install taparash[anonymizer]`. Falls back to hash if Faker unavailable. |
+| `"tag"` | `[EMAIL]` | ✓ | Replace with PII type label. Useful for downstream analysis. |
+
+**Global strategy:**
+```python
+from taparash import PIIMasker
+
+masker = PIIMasker(anonymization_strategy="hash")
+masked, _ = masker.mask("Contact admin@company.com")
+# → "Contact [SHA:7f8a9e2c]"
+```
+
+**Per-entity overrides:**
+```python
+from taparash import TaparashFilter, QualityConfig
+
+config = QualityConfig(
+    pii_anonymization_strategy="redact",
+    pii_strategies={"email": "hash", "phone": "replace", "ssn": "tag"},
+)
+# Emails → hash, phones → Faker replacement, SSNs → [SSN], everything else → [REDACTED]
+```
+
+---
+
+## Heuristic Quality Rules
+
+Three Gopher/C4–style heuristic checks (all optional, disabled by default):
+
+```python
+from taparash import TaparashFilter, QualityConfig
+
+config = QualityConfig(
+    enable_heuristic_quality=True,
+    heuristic_max_line_length=1000,            # chars above which a line is "too long"
+    heuristic_max_line_length_ratio=0.3,       # reject if >30% of lines are too long
+    heuristic_max_symbol_density=0.1,          # reject if >10% non-alphanumeric chars
+    heuristic_max_word_repetition_ratio=0.5,   # reject if >50% words are duplicates
+)
+
+f = TaparashFilter(config)
+result = f.process_single("click click click buy now buy now")
+# → rejected with reason_code="HIGH_WORD_REPETITION"
+```
+
+---
+
+## Language Identification
+
+Filter text by detected language (optional; requires `pip install taparash[langid]`):
+
+```python
+from taparash import TaparashFilter, QualityConfig
+
+config = QualityConfig(
+    enable_language_filter=True,
+    allowed_languages=["en", "de", "fr"],
+)
+
+f = TaparashFilter(config)
+result = f.process_single("Bonjour le monde")
+# → accepted (French is in allowed list)
+
+result = f.process_single("你好世界")
+# → rejected with reason_code="LANGUAGE_NOT_ALLOWED"
+```
+
+The language filter gracefully degrades if `langdetect` is not installed — chunks pass through without language checks. This ensures the pipeline never breaks on a missing optional dependency.
 
 ---
 
@@ -275,6 +378,12 @@ taparash mask raw.jsonl masked.jsonl
 # European PII opt-ins
 taparash filter corpus.jsonl clean.jsonl --pii-iban --pii-eu-vat --pii-eu-phone
 
+# Anonymization strategies
+taparash filter corpus.jsonl clean.jsonl --pii-strategy hash --stats
+
+# Heuristic quality + language filters
+taparash filter corpus.jsonl clean.jsonl --enable-heuristic --allowed-languages en de fr
+
 # Save rejected chunks for inspection
 taparash filter corpus.jsonl clean.jsonl --rejected rejected.jsonl --no-dlq
 
@@ -293,6 +402,11 @@ Key flags for `filter`:
 | `--pii-iban` | Enable IBAN detection |
 | `--pii-eu-vat` | Enable EU VAT detection |
 | `--pii-eu-phone` | Enable EU local phone detection |
+| `--pii-dates` | Enable date/time PII detection (opt-in) |
+| `--pii-strategy {redact,hash,replace,tag}` | Anonymization strategy (default: `redact`) |
+| `--enable-heuristic` | Enable heuristic quality filter (Gopher/C4 rules) |
+| `--allowed-languages LANG [LANG ...]` | Language whitelist, e.g. `en de fr` (requires `--enable-language-filter`) |
+| `--enable-language-filter` | Enable language identification gate |
 | `--rejected FILE` | Write rejected chunks (with reason) to FILE |
 | `--stats` | Print summary counts to stderr |
 | `--text-field FIELD` | JSON field containing the text (default: `text`) |

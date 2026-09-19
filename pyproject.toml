@@ -8,10 +8,10 @@ version = "0.4.0"
 description = "Air-Gapped, Zero-LLM Data Quality & Compliance Gateway for RAG Systems"
 readme = "README.md"
 authors = [
-    {name = "Taparash Contributors", email = "sn391@github.com"}
+    {name = "Semko Kremashani", email = "sn391@github.com"}
 ]
 maintainers = [
-    {name = "Taparash Contributors", email = "sn391@github.com"}
+    {name = "Semko Kremashani", email = "sn391@github.com"}
 ]
 license = {file = "LICENSE"}
 requires-python = ">=3.9"
@@ -64,6 +64,12 @@ connectors-full = [
     "taparash[connectors]",
     "unstructured[all-docs]>=0.10.0",
 ]
+langid = [
+    "langdetect>=1.0.9",
+]
+anonymizer = [
+    "faker>=18.0.0",
+]
 distributed = [
     "ray>=2.0.0",
 ]
@@ -101,6 +107,8 @@ all = [
     "ray>=2.0.0",
     "langchain-core>=0.1.0",
     "llama-index-core>=0.10.0",
+    "langdetect>=1.0.9",
+    "faker>=18.0.0",
 ]
 
 [project.scripts]

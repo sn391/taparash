@@ -1,7 +1,7 @@
 """Configuration management for Taparash."""
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Optional, List
+from typing import Any, Callable, Dict, List, Optional
 
 
 @dataclass
@@ -67,6 +67,24 @@ class QualityConfig:
     pii_mask_iban: bool = False
     pii_mask_eu_vat: bool = False
     pii_mask_eu_phone: bool = False
+    # Date/time PII (opt-in; disabled by default to avoid false positives on
+    # dates that appear in normal prose)
+    pii_mask_dates: bool = False
+    # Anonymization strategy: "redact" | "hash" | "replace" | "tag"
+    pii_anonymization_strategy: str = "redact"
+    # Per-entity strategy overrides, e.g. {"email": "hash", "phone": "replace"}
+    pii_strategies: Dict[str, str] = field(default_factory=dict)
+
+    # Heuristic quality rules (Gopher / C4)
+    enable_heuristic_quality: bool = False
+    heuristic_max_line_length: int = 1000
+    heuristic_max_line_length_ratio: float = 0.3
+    heuristic_max_symbol_density: float = 0.1
+    heuristic_max_word_repetition_ratio: float = 0.5
+
+    # Language identification (requires langdetect; opt-in)
+    enable_language_filter: bool = False
+    allowed_languages: List[str] = field(default_factory=lambda: ["en"])
 
     # Dead Letter Queue
     enable_dlq: bool = True
@@ -130,6 +148,28 @@ class QualityConfig:
 
         if self.check_contradictions and not self.nli_model_path:
             errors.append("nli_model_path required when check_contradictions=True")
+
+        _valid_strategies = {"redact", "hash", "replace", "tag"}
+        if self.pii_anonymization_strategy not in _valid_strategies:
+            errors.append(
+                f"pii_anonymization_strategy must be one of {sorted(_valid_strategies)}, "
+                f"got {self.pii_anonymization_strategy!r}"
+            )
+        for entity, strat in self.pii_strategies.items():
+            if strat not in _valid_strategies:
+                errors.append(
+                    f"pii_strategies[{entity!r}] must be one of {sorted(_valid_strategies)}, "
+                    f"got {strat!r}"
+                )
+
+        if not 0.0 <= self.heuristic_max_line_length_ratio <= 1.0:
+            errors.append("heuristic_max_line_length_ratio must be between 0.0 and 1.0")
+        if not 0.0 <= self.heuristic_max_symbol_density <= 1.0:
+            errors.append("heuristic_max_symbol_density must be between 0.0 and 1.0")
+        if not 0.0 <= self.heuristic_max_word_repetition_ratio <= 1.0:
+            errors.append("heuristic_max_word_repetition_ratio must be between 0.0 and 1.0")
+        if self.heuristic_max_line_length < 1:
+            errors.append("heuristic_max_line_length must be >= 1")
 
         return errors
 

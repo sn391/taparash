@@ -13,6 +13,8 @@ try:
     from taparash.core.entropy import shannon_entropy, is_gibberish
     from taparash.core.deduplication import ExactDeduplicator, MinHashDeduplicator
     from taparash.core.pii import PIIMasker
+    from taparash.core.quality import HeuristicQualityFilter
+    from taparash.core.langid import LanguageFilter
     from taparash.dlq import DeadLetterQueue
     from taparash.metrics import PipelineMetrics
 except ImportError:
@@ -21,6 +23,8 @@ except ImportError:
     from core.entropy import shannon_entropy, is_gibberish
     from core.deduplication import ExactDeduplicator, MinHashDeduplicator
     from core.pii import PIIMasker
+    from core.quality import HeuristicQualityFilter
+    from core.langid import LanguageFilter
     from dlq import DeadLetterQueue
     from metrics import PipelineMetrics
 
@@ -73,6 +77,8 @@ class TaparashFilter:
 
         # Initialize components
         self._init_pii_masker()
+        self._init_heuristic_quality()
+        self._init_language_filter()
         self._init_deduplicators()
         self._init_semantic_dedup()
         self._init_contradiction_detector()
@@ -87,6 +93,8 @@ class TaparashFilter:
             "total_processed": 0,
             "rejected_length": 0,
             "rejected_entropy": 0,
+            "rejected_heuristic_quality": 0,
+            "rejected_language": 0,
             "rejected_exact_duplicate": 0,
             "rejected_fuzzy_duplicate": 0,
             "rejected_semantic_duplicate": 0,
@@ -105,10 +113,34 @@ class TaparashFilter:
                 mask_iban=self.config.pii_mask_iban,
                 mask_eu_vat=self.config.pii_mask_eu_vat,
                 mask_eu_phone=self.config.pii_mask_eu_phone,
-                replacement_token=self.config.pii_replacement_token
+                mask_dates=self.config.pii_mask_dates,
+                replacement_token=self.config.pii_replacement_token,
+                anonymization_strategy=self.config.pii_anonymization_strategy,
+                strategies=self.config.pii_strategies,
             )
         else:
             self.pii_masker = None
+
+    def _init_heuristic_quality(self):
+        """Initialize heuristic quality filter."""
+        if self.config.enable_heuristic_quality:
+            self.heuristic_quality = HeuristicQualityFilter(
+                max_line_length=self.config.heuristic_max_line_length,
+                max_line_length_ratio=self.config.heuristic_max_line_length_ratio,
+                max_symbol_density=self.config.heuristic_max_symbol_density,
+                max_word_repetition_ratio=self.config.heuristic_max_word_repetition_ratio,
+            )
+        else:
+            self.heuristic_quality = None
+
+    def _init_language_filter(self):
+        """Initialize language identification gate."""
+        if self.config.enable_language_filter:
+            self.language_filter = LanguageFilter(
+                allowed_languages=self.config.allowed_languages,
+            )
+        else:
+            self.language_filter = None
 
     def _init_deduplicators(self):
         """Initialize deduplication components."""
@@ -189,6 +221,8 @@ class TaparashFilter:
             accepted=s["accepted"],
             rejected_length=s["rejected_length"],
             rejected_entropy=s["rejected_entropy"],
+            rejected_heuristic_quality=s["rejected_heuristic_quality"],
+            rejected_language=s["rejected_language"],
             rejected_exact_dup=s["rejected_exact_duplicate"],
             rejected_fuzzy_dup=s["rejected_fuzzy_duplicate"],
             rejected_semantic_dup=s["rejected_semantic_duplicate"],
@@ -299,6 +333,42 @@ class TaparashFilter:
                     metadata={
                         "entropy": entropy,
                         "pii_masked_count": len(pii_matches)
+                    }
+                )
+
+        # Gate 4: Heuristic quality filter (Gopher/C4 rules)
+        if self.heuristic_quality:
+            quality_result = self.heuristic_quality.check(text)
+            if not quality_result.passed:
+                with self._stats_lock:
+                    self.stats["rejected_heuristic_quality"] += 1
+                return None, [], FilterResult(
+                    text=text,
+                    original_text=original_text,
+                    is_valid=False,
+                    reason_code=quality_result.reason_code,
+                    reason_detail=quality_result.reason_detail,
+                    metadata={"pii_masked_count": len(pii_matches)}
+                )
+
+        # Gate 5: Language identification
+        if self.language_filter:
+            if not self.language_filter.is_allowed(text):
+                detected = self.language_filter.detect(text)
+                with self._stats_lock:
+                    self.stats["rejected_language"] += 1
+                return None, [], FilterResult(
+                    text=text,
+                    original_text=original_text,
+                    is_valid=False,
+                    reason_code="LANGUAGE_NOT_ALLOWED",
+                    reason_detail=(
+                        f"Detected language {detected!r} not in "
+                        f"allowed list {self.language_filter.allowed_languages}"
+                    ),
+                    metadata={
+                        "detected_language": detected,
+                        "pii_masked_count": len(pii_matches),
                     }
                 )
 
@@ -656,6 +726,8 @@ class TaparashFilter:
             "total_processed": 0,
             "rejected_length": 0,
             "rejected_entropy": 0,
+            "rejected_heuristic_quality": 0,
+            "rejected_language": 0,
             "rejected_exact_duplicate": 0,
             "rejected_fuzzy_duplicate": 0,
             "rejected_semantic_duplicate": 0,
@@ -690,6 +762,8 @@ class TaparashFilter:
         print("Rejection Breakdown:")
         print(f"  - Length issues:     {stats['rejected_length']}")
         print(f"  - High entropy:      {stats['rejected_entropy']}")
+        print(f"  - Heuristic quality: {stats['rejected_heuristic_quality']}")
+        print(f"  - Language:          {stats['rejected_language']}")
         print(f"  - Exact duplicates:  {stats['rejected_exact_duplicate']}")
         print(f"  - Fuzzy duplicates:  {stats['rejected_fuzzy_duplicate']}")
         print(f"  - Semantic dupes:    {stats['rejected_semantic_duplicate']}")

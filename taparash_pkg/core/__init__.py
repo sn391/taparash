@@ -11,6 +11,8 @@ from .deduplication import (
     deduplicate_fuzzy,
 )
 from .pii import PIIMasker, PIIMatch, mask_pii, PIIDetector
+from .quality import HeuristicQualityFilter, QualityCheckResult
+from .langid import LanguageFilter
 
 __all__ = [
     "shannon_entropy",
@@ -26,4 +28,7 @@ __all__ = [
     "PIIMatch",
     "mask_pii",
     "PIIDetector",
+    "HeuristicQualityFilter",
+    "QualityCheckResult",
+    "LanguageFilter",
 ]
