@@ -5,6 +5,13 @@ import tempfile
 import pytest
 from taparash import load_config, save_config, QualityConfig
 
+# Check if PyYAML is available
+try:
+    import yaml  # noqa: F401
+    yaml_available = True
+except ImportError:
+    yaml_available = False
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -93,9 +100,10 @@ class TestLoadTOML:
 
 
 # ---------------------------------------------------------------------------
-# YAML loading
+# YAML loading (requires pyyaml)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skipif(not yaml_available, reason="PyYAML not installed")
 class TestLoadYAML:
     def test_basic_yaml(self):
         path = write_tmp(
@@ -198,9 +206,10 @@ class TestSaveTOML:
 
 
 # ---------------------------------------------------------------------------
-# save_config — YAML round-trip
+# save_config — YAML round-trip (requires pyyaml)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.skipif(not yaml_available, reason="PyYAML not installed")
 class TestSaveYAML:
     def test_round_trip_yaml(self):
         original = QualityConfig(
