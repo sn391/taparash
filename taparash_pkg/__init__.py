@@ -5,7 +5,7 @@ Taparash - Zero-LLM Data Quality & Compliance Gateway for RAG Systems.
 deduplication, semantic analysis, and contradiction detection.
 """
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 # Core imports - relative imports within package
 from .core import (
