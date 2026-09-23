@@ -72,7 +72,7 @@ jobs:
         bandit -r taparash_pkg/ -f screen
 
     - name: Upload bandit report
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       if: always()
       with:
         name: bandit-security-report
